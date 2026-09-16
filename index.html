@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>ITTs · Hệ thống tuân thủ SOP - Bản demo</title>
+<meta name="description" content="Bản demo hệ thống vận hành theo SOP của IELTS The Tutors - chọn cổng nhân viên, cổng học viên hay cổng phụ huynh.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='16' fill='%23D51920'/%3E%3Ccircle cx='20' cy='20' r='7' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#2E5A88; --navyd:#1E3A5F; --red:#D51920; --ink:#1E2A38; --muted:#6B7887;
+  --line:#E3E9F0; --card:#FFFFFF;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:'Montserrat',system-ui,-apple-system,'Segoe UI',sans-serif;
+  color:var(--ink);
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:40px 20px; line-height:1.5;
+  background-color:#EEF2F6;
+  background-image:
+    radial-gradient(720px 360px at 10% -8%, rgba(213,25,32,.09), rgba(213,25,32,0) 62%),
+    radial-gradient(880px 460px at 90% 2%, rgba(46,90,136,.17), rgba(46,90,136,0) 64%),
+    radial-gradient(700px 420px at 50% 118%, rgba(30,58,95,.10), rgba(30,58,95,0) 66%),
+    linear-gradient(180deg,#F8FBFE 0%,#E9EFF6 100%);
+  background-attachment:fixed;
+}
+.wrap{width:100%;max-width:880px}
+
+.head{text-align:center;margin-bottom:24px}
+.logo{display:inline-flex;align-items:center;gap:13px}
+.logo svg{width:42px;height:42px;flex:none}
+.logo b{font-size:23px;font-weight:800;letter-spacing:1.1px;color:var(--navyd);line-height:1;display:block;text-transform:uppercase}
+.logo span{display:block;font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:.6px;margin-top:5px}
+
+/* Nhịp hai bước: bước 1 chọn BẢN, bước 2 chọn CỔNG. Mỗi bước có một câu hỏi duy nhất -
+   trước đây bốn cửa bày phẳng ra cùng lúc, người xem phải tự tách "bản nào" khỏi "cổng nào". */
+.buoc{display:none}
+.buoc.on{display:block}
+.hoi{text-align:center;margin-bottom:16px}
+.hoi h1{font-size:17px;font-weight:800;color:var(--ink);letter-spacing:.2px}
+.hoi p{font-size:12.5px;color:var(--muted);margin-top:5px}
+.buocso{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.6px;
+ text-transform:uppercase;color:var(--muted);margin-bottom:7px}
+
+.doors{display:grid;grid-template-columns:1fr;gap:14px}
+@media(min-width:700px){.doors{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1080px){.doors.ba{grid-template-columns:repeat(3,1fr)}}
+.tag{display:inline-block;vertical-align:2px;margin-left:6px;font-size:10px;font-weight:700;
+ letter-spacing:.4px;text-transform:uppercase;padding:2px 7px;border-radius:999px;
+ background:#FBF3E4;color:#7A5B12}
+.tag.xam{background:#EEF2F6;color:#5A6675}
+.sosanh{margin:22px auto 0;max-width:980px;border:1px solid var(--line,#E4E9F0);border-radius:14px;
+ background:#fff;padding:16px 18px}
+.sosanh h3{font-size:13.5px;font-weight:800;color:var(--ink,#1E2A38);margin-bottom:10px}
+.khuyen{font-size:13px;line-height:1.7;color:var(--ink,#1E2A38)}
+.khuyen p{margin:0 0 8px}
+.khuyen p.nho{font-size:12px;color:#5A6675;margin-bottom:0}
+.sosanh table{width:100%;border-collapse:collapse;font-size:12.5px}
+.sosanh th,.sosanh td{text-align:left;padding:7px 8px;border-top:1px solid var(--line,#E4E9F0);
+ color:var(--muted,#6B7887);vertical-align:top}
+.sosanh th{color:var(--ink,#1E2A38);font-weight:700;border-top:0}
+.sosanh td:first-child{color:var(--ink,#1E2A38);font-weight:600;width:30%}
+.door{
+  display:flex;flex-direction:column;text-decoration:none;color:inherit;
+  background:var(--card);border:1px solid var(--line);border-radius:15px;padding:20px 18px 17px;
+  box-shadow:0 2px 10px rgba(30,58,95,.05);
+  transition:.16s ease; position:relative; overflow:hidden;
+}
+.door:hover{transform:translateY(-3px);box-shadow:0 16px 34px rgba(16,32,58,.13)}
+.door:focus-visible{outline:3px solid var(--accent,var(--navyd));outline-offset:2px}
+.dic{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;
+  background:var(--accent,var(--navyd));color:#fff;margin-bottom:12px;flex:none}
+.dic svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.door h2{font-size:16px;font-weight:700;color:var(--ink);margin-bottom:4px}
+.door p{font-size:12.5px;color:var(--muted);line-height:1.55;flex:1}
+.door .go{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:700;
+  color:var(--accent,var(--navyd));margin-top:12px}
+.door .go svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;transition:.16s}
+.door:hover .go svg{transform:translateX(3px)}
+.d1{--accent:#1E3A5F} .d2{--accent:#0D7C66} .d3{--accent:#8A4FD3} .d4{--accent:#B58A2B}
+
+/* Dải cho biết đang đứng ở bản nào + lối quay lại. Không có nó thì vào tới bước 2 là mất dấu:
+   ba cổng của bản 5 và của bản 6 trông y hệt nhau. */
+.dangxem{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+ background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:16px}
+.dangxem b{font-size:13px;font-weight:700;color:var(--ink)}
+.dangxem small{font-size:12px;color:var(--muted)}
+.doiban{margin-left:auto;display:inline-flex;align-items:center;gap:5px;text-decoration:none;
+ font-size:12.5px;font-weight:700;color:var(--navyd);
+ border:1px solid var(--line);border-radius:9px;padding:6px 11px;background:#F7FAFD;transition:.16s ease}
+.doiban:hover{background:#EDF3F9}
+.doiban svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.ghichu{font-size:12px;color:var(--muted);margin-top:14px;text-align:center;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <div class="logo">
+      <svg viewBox="0 0 40 40" aria-hidden="true">
+        <g fill="none" stroke="#D51920" stroke-width="3.2"><circle cx="20" cy="20" r="14"/><circle cx="20" cy="20" r="7.5"/></g>
+        <circle cx="20" cy="20" r="3.4" fill="#D51920"/>
+        <g stroke="#D51920" stroke-width="3.2"><line x1="20" y1="1.5" x2="20" y2="9"/><line x1="20" y1="31" x2="20" y2="38.5"/><line x1="1.5" y1="20" x2="9" y2="20"/><line x1="31" y1="20" x2="38.5" y2="20"/></g>
+      </svg>
+      <div style="text-align:left">
+        <b>IELTS The Tutors</b>
+        <span>HỆ THỐNG TUÂN THỦ SOP · BẢN DEMO</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══ CHỌN CỔNG ═══
+       V9.99 (anh Luân 04/08: *"Hủy V6 nhé em"*): trang này từng có HAI bước - chọn bản 5
+       hay bản 6, rồi mới chọn cổng. Bản 6 đã ngừng phát hành nên bước chọn bản không còn
+       nghĩa gì; giữ lại một bước rỗng chỉ tổ bắt người ta bấm thừa một lần. Nay vào thẳng
+       ba cổng. Lịch sử của bước kia nằm trong git. ═══ -->
+  <section class="buoc on" id="b5">
+    <div class="hoi">
+      <h1>Vào bằng cổng nào</h1>
+      <p>Ba cổng nhìn cùng một bộ dữ liệu, mỗi cổng chỉ hiện phần của người đó.</p>
+    </div>
+
+    <nav class="doors ba">
+      <a class="door d1" href="cong-nhan-vien/">
+        <div class="dic"><svg viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5"/><path d="M9 11h.01M15 11h.01"/></svg></div>
+        <h2>Cổng nhân viên</h2>
+        <p>Việc hôm nay theo SOP, hồ sơ học viên, báo cáo KPI, cấu hình hệ thống.</p>
+        <span class="go">Vào cổng
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+      </a>
+
+      <a class="door d2" href="cong-hoc-vien/">
+        <div class="dic"><svg viewBox="0 0 24 24"><path d="M22 10L12 5 2 10l10 5 10-5z"/><path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/></svg></div>
+        <h2>Cổng học viên</h2>
+        <p>Lịch học, bài tập, buổi WOW 1-1, học phí theo đợt, trao đổi với trung tâm.</p>
+        <span class="go">Vào cổng
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+      </a>
+
+      <a class="door d3" href="cong-hoc-vien/?phuhuynh">
+        <div class="dic"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+        <h2>Cổng phụ huynh</h2>
+        <p>Theo dõi việc học của con - ẩn phần trao đổi riêng tư của các em.</p>
+        <span class="go">Vào cổng
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+      </a>
+    </nav>
+  </section>
+
+
+  <noscript>
+    <div class="ghichu">Ba cửa vào bản demo:</div>
+    <nav class="doors" style="margin-top:14px">
+      <a class="door d1" href="cong-nhan-vien/"><h2>Cổng nhân viên</h2>
+        <p>Việc hôm nay theo SOP, hồ sơ học viên, báo cáo KPI, cấu hình hệ thống.</p></a>
+      <a class="door d2" href="cong-hoc-vien/"><h2>Cổng học viên</h2>
+        <p>Lịch học, bài tập, buổi WOW 1-1, học phí theo đợt.</p></a>
+      <a class="door d3" href="cong-hoc-vien/?phuhuynh"><h2>Cổng phụ huynh</h2>
+        <p>Theo dõi việc học của con.</p></a>
+    </nav>
+  </noscript>
+
+</div>
+
+<script>
+/* V9.99 - MỘT BƯỚC, KHÔNG CÒN ĐIỀU HƯỚNG. Trang này từng là hai bước trên một trang (chọn bản
+   `?ban5`/`?ban6` rồi chọn cổng) với pushState và popstate để nút Back còn chạy. Bản 6 ngừng
+   phát hành nên chỉ còn một bước - ba cửa hiện thẳng, không còn gì để điều hướng.
+   Các cửa vẫn là thẻ <a href> thật chứ không phải nút gọi JS: chuột phải mở tab mới được, và
+   kịch bản `update.sh` bên repo demo đọc được href để chốt cửa nào 404.
+   Mẩu nhớ `ITTS_BAN` cũng bỏ theo: nó sinh ra để cổng học viên biết khách đang xem bản nào mà
+   quay về đúng bản; nay chỉ có một bản nên không còn gì để nhớ. */
+</script>
+</body>
+</html>

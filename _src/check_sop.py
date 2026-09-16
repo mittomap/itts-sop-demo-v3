@@ -1,0 +1,1108 @@
+"""DOI CHIEU SOP GOC voi APP: cot nao SOP mo ta ma app khong he dung?
+
+VI SAO CO FILE NAY (anh Luan chot 29/07):
+  "chung ta viet app de phuc vu tron ven SOP, neu lam xong ma chua the hien du 100% sop tuc la
+   that bai. Chung ta co the them, co the bo sung, co the dieu chinh de no hop ly va logic hon,
+   tham chi them chuc nang moi. Nhung neu chung ta de thieu sot nhung gi SOP da tung mo ta, neu
+   chung ta thay no khong bi bat hop ly, ma chung ta lam sot, nghia la chung ta sai."
+
+Truoc khi co file nay, viec "app da phu het SOP chua" hoan toan dua vao TRI NHO. Va no da sot
+that: 5 cot ve nguoi giam ho / phu huynh trong DL09 (emergency_contact_name/phone/relation,
+gender, address) nam trong SOP, nam san trong du lieu, ma KHONG MOT DONG MA NAO cua app doc toi
+- khong man hinh nao hien ra. Sot nhu vay khong ai phat hien duoc bang mat.
+
+CACH LAM: doc THANG file SOP goc (ITTs_Operations_Template_v4.xlsx), lay ten cot cua moi bang
+DL, roi soi xem gen_v5.py co nhac toi khong. Cot nao app khong dung thi PHAI khai vao BOQUA duoi
+day KEM LY DO. Khong khai = do.
+
+Chay:  python3 check_sop.py        (ma thoat 0 = du, khac 0 = con sot)
+"""
+import json
+import os
+import re
+import sys
+import zipfile
+
+SD = os.path.dirname(os.path.abspath(__file__))
+GOC = os.environ.get("ITTS_OUT") or os.path.dirname(SD)
+SOP = os.path.join(GOC, "ITTs_Operations_Template_v4.xlsx")
+
+# ── COT SOP CO MA APP CO Y KHONG DUNG ────────────────────────────────────────
+# Moi dong phai co LY DO doc duoc. "App khong can" khong phai ly do - phai noi RO app lam gi
+# thay cho cot do. Them dong vao day la mot quyet dinh, khong phai mot cach lam im hang do.
+BOQUA = {
+    ("DL03", "auto_trigger_hint"):
+        "Cot GOI Y TU TINH cua ban Google Sheets (ARRAYFORMULA). App tinh song bang naLive()/naFor() "
+        "doc thang trang thai that + CH4, chinh xac hon cot luu san (cot luu san loi thoi ngay khi "
+        "trang thai doi ma khong ai mo sheet).",
+    ("DL06", "auto_trigger_hint"): "Nhu tren.",
+    ("DL08", "auto_trigger_hint"): "Nhu tren.",
+    ("DL08", "sla_status"):
+        "Trang thai SLA TU TINH. App tinh song bang obState() tu assigned_at + nguong CH2 - doi "
+        "nguong trong Cai dat la doi theo ngay lap tuc, cot luu san thi khong.",
+    ("DL17", "sla_status"):
+        "Nhu tren, app tinh trong slaItems() theo muc nghiem trong (slaKN_high/medium/low_hours).",
+    ("DL11", "teacher_note_within_sla"):
+        "Co trong han hay khong la TU TINH. App tinh bang bhState() so gio ghi nhan xet voi "
+        "slaTeacherNote_hours.",
+}
+
+
+def _sst(z):
+    """Bang chuoi dung chung cua file xlsx - PHAI cat theo <si>, khong phai theo <t>.
+
+    Da can dung: mot o co dinh dang (chu dam mot doan) thi Excel chia thanh nhieu <t> trong CUNG
+    mot <si>. Neu cat theo <t> thi tu o do tro di MOI chi so deu lech, va cai lech do im lang -
+    doc ra mot chuoi khac han nhung van la chuoi hop le, nen mat thuong khong thay. Bang phan
+    quyen CH3 doc ra toan so "1750, 1755" chinh la vi vay.
+    """
+    shared = [n for n in z.namelist() if "sharedStrings" in n]
+    if not shared:
+        return []
+    xml = z.read(shared[0]).decode("utf-8", "ignore")
+    out = []
+    for si in re.findall(r"<si>(.*?)</si>", xml, re.S):
+        s = "".join(re.findall(r"<t[^>]*>(.*?)</t>", si, re.S))
+        out.append(s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+                   .replace("&quot;", '"').replace("&#10;", " / "))
+    return out
+
+
+def _oCua(z, rels, rid, ss):
+    """Doc mot sheet ra danh sach dong, moi dong la dict {cot chu: gia tri}."""
+    xml = z.read("xl/" + rels[rid]).decode("utf-8", "ignore")
+    cell = re.compile(r'<c\b([^>]*?)(?:/>|>(.*?)</c>)', re.S)   # o RONG tu dong: <c .../> - xem _sst
+    val = re.compile(r"<v>(.*?)</v>", re.S)
+    out = []
+    for body in re.findall(r"<row[^>]*>(.*?)</row>", xml, re.S):
+        d = {}
+        for m in cell.finditer(body):
+            a = m.group(1) or ""
+            col = re.search(r'r="([A-Z]+)\d+"', a)
+            v = val.search(m.group(2) or "")
+            v = v.group(1) if v else ""
+            if 't="s"' in a and v.isdigit() and int(v) < len(ss):
+                v = ss[int(v)]
+            if col:
+                d[col.group(1)] = str(v).strip()
+        out.append(d)
+    return out
+
+
+# ── BANG DL VE THEO KIEU LUOI (khong co hang tieu de cot) ────────────────────
+# `_cols()` di tim mot hang tieu de gom cac o dang `snake_case`. Bang nao trong SOP ve theo LUOI
+# (cot = ngay, hang = khung gio) thi KHONG co hang ay - va truoc 10/08 no bi BO QUA TRONG IM
+# LANG: khong mot dong nao bao, so "bang du lieu" in ra van dep.
+#
+# Do dung la cach `DL19. Lich lam viec WOW` tron thoat khoi ca 39 bo kiem. SOP mo ta no hang
+# thang - luoi truc, tong gio truc, cam ket 40h - ma khong phep do nao cua du an nhin thay. Phai
+# doi anh Luan noi ra thi moi biet.
+#
+# Nay: bang DL nao khong doc duoc cot thi PHAI khai o day, KEM BANG CHUNG app da lam - la nhung
+# chuoi phai co that trong gen_v5.py. Khai suong khong duoc tinh; khai roi ma app go mat thi do.
+LUOI = {
+    "DL19": ("Lich lam viec WOW. SOP ve theo LUOI (cot = ngay, hang = khung gio, o trong = khong "
+             "ai truc) nen khong co hang tieu de cot de doc. App lam thanh bang DL26 + man "
+             "`Lich truc WOW`: NV WOW tu dang ky ca, hoc vien/hoc vu chi dat buoi WOW vao ca da "
+             "dang ky. LUU Y SO HIEU: DL19 cua APP la 'Thuong gioi thieu' - trung so voi SOP, nen "
+             "bang lich truc mang so DL26.",
+             ["DL26", "renderLichWow", "lwSave", "wowShifts", "wowSlotMinutes",
+              "wowCommitHours_month", "wowWeeksAhead", "wowBookLeadDays", "wowCancelMinDays",
+              "Bảng đăng ký lịch WOW", "Tổng giờ trực theo NV WOW", "unavailable"]),
+}
+
+
+def _dl_sheets():
+    """MOI ten bang DL co trong file SOP - ke ca bang khong doc duoc cot."""
+    z = zipfile.ZipFile(SOP)
+    ten = re.findall(r'<sheet name="([^"]+)"', z.read("xl/workbook.xml").decode("utf-8", "ignore"))
+    return [t.split(".")[0] for t in ten if re.match(r"^DL\d", t)]
+
+
+def _cols():
+    """Ten cot cua tung bang DL trong file SOP goc."""
+    z = zipfile.ZipFile(SOP)
+    rels = dict(re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"',
+                           z.read("xl/_rels/workbook.xml.rels").decode("utf-8", "ignore")))
+    sheets = re.findall(r'<sheet name="([^"]+)"[^>]*r:id="(rId\d+)"',
+                        z.read("xl/workbook.xml").decode("utf-8", "ignore"))
+    ss = _sst(z)
+    cell = re.compile(r'<c\b([^>]*?)(?:/>|>(.*?)</c>)', re.S)   # o RONG tu dong: <c .../> - xem _sst
+    val = re.compile(r'<v>(.*?)</v>', re.S)
+
+    def vals(row):
+        out = []
+        for m in cell.finditer(row):
+            attrs = m.group(1) or ""
+            v = val.search(m.group(2) or "")
+            v = v.group(1) if v else ""
+            if 't="s"' in attrs and v.isdigit() and int(v) < len(ss):
+                v = ss[int(v)]
+            out.append(v)
+        return out
+
+    res = {}
+    for name, rid in sheets:
+        if not re.match(r"^DL\d", name):
+            continue
+        path = "xl/" + rels.get(rid, "")
+        if path not in z.namelist():
+            continue
+        rows = re.findall(r"<row[^>]*>(.*?)</row>",
+                          z.read(path).decode("utf-8", "ignore"), re.S)
+        best = []
+        for r in rows[:8]:                      # dong tieu de nam trong may dong dau
+            cand = [v for v in vals(r) if re.match(r"^[a-z][a-z0-9_]{2,}$", str(v))]
+            if len(cand) > len(best):
+                best = cand
+        if best:
+            res[name.split(".")[0]] = best
+    return res
+
+
+if not os.path.exists(SOP):
+    raise SystemExit("KHONG THAY file SOP goc: %s" % SOP)
+
+COLS = _cols()
+SRC = open(os.path.join(SD, "gen_v5.py"), encoding="utf-8").read()
+
+# ── 0. KHONG BANG DL NAO DUOC BIEN MAT KHONG MOT TIENG DONG ──────────────────
+_bo = [s for s in _dl_sheets() if s not in COLS]
+_loi0 = []
+for _s in _bo:
+    if _s not in LUOI:
+        _loi0.append("   X %s: SOP co bang nay ma check_sop khong doc duoc cot nao, va khong ai "
+                     "khai ly do. Khai vao LUOI kem bang chung app da lam." % _s)
+        continue
+    _ly, _bc = LUOI[_s]
+    _thieu = [b for b in _bc if b not in SRC]
+    if _thieu:
+        _loi0.append("   X %s: da khai la app co lam, nhung gen_v5.py KHONG con dau vet: %s"
+                     % (_s, ", ".join(_thieu)))
+for _s in list(LUOI):
+    if _s not in _bo:
+        _loi0.append("   X %s: khai LUOI thua - bang nay nay da doc duoc cot binh thuong, bo dong "
+                     "khai di de no vao dien do cot nhu moi bang khac." % _s)
+if _loi0:
+    print("BANG DL BI BO QUA MA KHONG AI KHAI (%d):" % len(_loi0))
+    for _x in _loi0:
+        print(_x)
+    print("KET QUA: KHONG DAT")
+    sys.exit(1)
+
+tong = 0
+sot = []
+thua_boqua = []
+for tb, cols in COLS.items():
+    for c in cols:
+        tong += 1
+        dung = re.search(r"\b" + re.escape(c) + r"\b", SRC) is not None
+        khai = (tb, c) in BOQUA
+        if dung and khai:
+            thua_boqua.append("%s.%s" % (tb, c))
+        elif not dung and not khai:
+            sot.append("%s.%s" % (tb, c))
+
+print("=" * 78)
+print("DOI CHIEU SOP GOC <-> APP")
+print("  file SOP     : %s" % os.path.basename(SOP))
+print("  bang du lieu : %d doc duoc cot + %d ve theo luoi (da khai): %s"
+      % (len(COLS), len(_bo), ", ".join(_bo) or "khong"))
+print("  cot SOP mo ta: %d" % tong)
+print("  co y khong dung (da khai ly do): %d" % len(BOQUA))
+print()
+if thua_boqua:
+    print("KHAI BOQUA THUA - app DA dung nhung van con trong danh sach bo qua:")
+    for x in thua_boqua:
+        print("   - %s   (bo dong nay khoi BOQUA)" % x)
+    print()
+# ═══ LY DO MIEN TRU PHAI CON DUNG, KHONG CHI CON TON TAI (audit 18/08) ══════════════════════
+# Sau moi ban khai BOQUA la mot cau kieu "app tinh song bang obState()/naFor()/bhState()". Bo
+# kiem cu chi hoi "cot nay co khai mien khong"; khong ai hoi "cai ham duoc vien dan con song
+# khong". Doi ten mot ham la loi khai lang le thanh sai - cot van duoc mien, ma ly do mien thi
+# khong con thuc. Nay moi ten ham xuat hien trong ly do deu phai tim thay trong app.
+_hamThieu = []
+for _k, _ly in BOQUA.items():
+    for _fn in set(re.findall(r"\b([a-zA-Z][A-Za-z0-9_]{2,})\(\)", _ly)):
+        if not re.search(r"\bfunction\s+" + re.escape(_fn) + r"\s*\(", SRC):
+            _hamThieu.append("%s.%s -> ly do vien dan `%s()` ma app khong co ham do"
+                             % (_k[0], _k[1], _fn))
+if _hamThieu:
+    print("LY DO MIEN TRU DA LOI THOI - ham duoc vien dan khong con trong app:")
+    for x in _hamThieu:
+        print("   X %s" % x)
+    print("   Sua lai ly do trong BOQUA cho dung ten ham hien tai, hoac bo mien tru di.")
+    print("KET QUA: KHONG DAT")
+    sys.exit(1)
+
+if sot:
+    print("SOT %d COT SOP MO TA MA APP KHONG HE DUNG:" % len(sot))
+    for x in sot:
+        print("   X %s" % x)
+    print()
+    print("Sua app cho dung cot do, HOAC khai vao BOQUA trong check_sop.py KEM LY DO.")
+    print("KET QUA: KHONG DAT")
+    sys.exit(1)
+print("KET QUA COT: DAT - moi cot SOP mo ta deu duoc app dung, hoac da khai ly do co y bo qua.")
+
+
+# ═══ PHAN 2: SO TRIGGER HD3 - APP CO SINH RA MOI TINH HUONG SOP MO TA KHONG? ══════════
+# Doi chieu cot moi biet du lieu co cho de LUU. Con SO TRIGGER moi la phan noi "khi nao thi app
+# phai nhac viec gi" - tuc la phan NGHIEP VU that su. Da sot that: naFor() khong he co nhanh nao
+# cho DL09 (hoc vien), DL11 (buoi hoc), DL12 (diem danh), nen 21 ma nhac viec SOP viet cho ba
+# bang do CHUA BAO GIO CHAY - va khong ai phat hien duoc, vi man hinh van day du va van dep.
+#
+# Cach do: chay THAT naFor() tren MOI dong cua MOI bang roi xem app sinh ra nhung ma nao.
+# Khong soi ma nguon - soi ma nguon chi biet "co viet" chu khong biet "co chay".
+
+TRIG_BOQUA = {
+    # ═══ 13/08 - VIET LAI TRON BO. Nam ban khai o day da CU: chung noi ve mot tinh huong khac
+    # han cai ma SOP hien nay dat cho ma do (so hieu NA xe dich khi file SOP duoc sua). Bo kiem
+    # xanh suot vi no chi hoi "ma nay co trong danh sach khong", khong hoi "ly do con dung khong".
+    # Nay moi ly do deu doi chieu duoc voi cot "Tinh huong" cua HD3 - va bon ma da duoc LAM THAT
+    # thay vi mien tru: NA045 (Quan tam hoc tiep), NA068 (Qua gio vao lop chua bat dau),
+    # NA069 (Con han ghi nhan xet), NA080 (Uu tien thap qua han - von da lam dung tu truoc).
+    "NA074": ("Qua han tru quota WOW - APP CO LAM (naFor DL14 tra NA074 khi qua "
+              "slaWowQuotaCheck_hours), nhung KHONG GIEO duoc tren demo: tinh huong nay theo dinh "
+              "nghia LA MOT LOI DU LIEU (buoi da day ma chua tru quota), ma man 'Suc khoe du lieu' "
+              "phai SACH tren du lieu goc (_check16, va loi anh Luan 'bam Reset demo la keo demo "
+              "ve trang thai hoan hao'). Hai bo kiem doi hai dieu nguoc nhau - chon giu man sach."),
+    "NA059": ("Dang ky da huy - SOP KHAI TRUNG mot tinh huong o HAI SHEET: CH4 dat ma NA008, HD3 "
+              "dat ma NA059, cung mot cau 'Dang ky da huy. Viec can lam: kiem tra va xu ly hoan "
+              "tien'. App lam NA008 (ban CH4). Khong phai thieu - la mot ma trung."),
+}
+
+# ── TINH HUONG CHI SONG TRONG MOT CUA SO NGAN ────────────────────────────────
+# NA050 ("lead moi con trong han") chi dung khi lead vao chua qua slaLRT_minutes = 15 phut. Mot bo
+# du lieu demo TINH khong the giu duoc tinh huong do: gieo luc build thi 16 phut sau no da thanh
+# NA049/NA046, va bo kiem se do vao ngay hom sau du khong ai dung vao ma. Day dung cai benh "bo
+# kiem khop voi mot con so troi theo lich" da can mot lan o check_data.
+# Cach lam dung: dung mot DONG DU LIEU tai cho voi moc thoi gian tinh theo BAY GIO, roi doi naFor()
+# tra ve dung ma. Van la chay that naFor(), khong phai soi ma nguon - chi khac la tinh huong do
+# minh dung len thay vi cho no tinh co co san.
+#   ma -> (bang, mo ta vi sao phai dung san, cac cot cua dong)
+#   gia tri {"__ago_min": n} = "n phut truoc", quy ra chuoi dd/mm/yyyy hh:mm luc chay.
+SYNTH = {
+    # V9.82: benh cu, lan thu tu. NA039 la nhanh "khieu nai muc TRUNG BINH da qua han xu ly"
+    # (hSince(complaint_time) > slaKN_medium_hours = 24 gio) va van CHUA giao ai, CHUA leo thang,
+    # CHUA giai quyet. Ba dieu kien "chua" ay khong song lau trong du lieu demo: chi can mot don
+    # khieu nai duoc gan nguoi xu ly la nhanh nay tat. Truoc day bo kiem xanh nho DONG HO THAT
+    # troi qua moc 24 gio - tuc no xanh vi may man, va den khi neo dong ho vao ngay sinh du lieu
+    # thi lo ra. Dung dong dung san cho chac tay, giong bon truong hop truoc.
+    "NA039": ("DL17",
+              "Nhanh 'khieu nai trung binh QUA HAN xu ly': don DA co nguoi xu ly (chua giao thi "
+              "ra NA081), chua leo thang, chua giai quyet, va da qua slaKN_medium_hours. Cua so "
+              "nay khong giu duoc trong bo du lieu demo co ngay sinh co dinh. Dat 96 gio chu khong phai dung 48: nguong slaKN_medium_hours dang cau hinh la 48 va phep so la > chu khong phai >=, dat sat mep la dong dung san tu roi xuong nhanh NA081.",
+              {"complaint_id": "KN-PROBE39", "complaint_status": "open (Mới)",
+               "complaint_severity": "medium (Trung bình)", "escalated_to": "",
+               "assigned_handler": "NV-001", "complaint_time": {"__ago_min": 60 * 96}}),
+    "NA049": ("DL02",
+              "Chi dung tu phut thu 15 den gio thu 4 sau khi lead vao (slaLRT_minutes -> "
+              "slaLeadReassign_hours). Cua so ba tieng ruoi nay khong the gieo tinh vao du lieu: "
+              "sang hom sau moi lead deu da qua han, va bo kiem do ma khong ai dung vao ma.",
+              {"lead_id": "L-PROBE49", "lead_status": "new (Mới)", "full_name": "Dong dung san",
+               "lead_created_time": {"__ago_min": 60}, "first_call_time": "",
+               "contact_count": 0, "next_followup_time": ""}),
+    "NA050": ("DL02",
+              "Chi dung trong 15 phut dau sau khi lead vao (slaLRT_minutes) - du lieu demo tinh "
+              "khong the giu duoc cua so nay.",
+              {"lead_id": "L-PROBE", "lead_status": "new (Mới)", "full_name": "Dong dung san",
+               "lead_created_time": {"__ago_min": 2}, "first_call_time": "",
+               "contact_count": 0, "next_followup_time": ""}),
+    # V9.57: cung mot benh, bat duoc trong dot lam the. NA076 la nhanh "buoi WOW xong, CON TRONG
+    # HAN ghi ket qua"; qua han thi thanh NA075. Cua so do dai dung slaWowNote_hours (24 gio), nen
+    # no chi dung khi du lieu demo tinh co co mot buoi WOW xong trong vong 24 gio truoc luc chay.
+    # Chay luc 14h thi con, chay luc 20h thi het - bo kiem do luc do se bao "app khong sinh ra
+    # NA076" trong khi app khong he doi mot dong nao. Dung dong dung san cho chac tay.
+    # V9.77: cung mot benh lan thu ba trong mot ngay (sau NA049/NA050/NA076, va sau ca
+    # check_logic sang nay). NA013 la nhanh "CON TRONG HAN xu ly" cua ho so xep lop: qua
+    # slaPLR48_hours (48 gio) thi doi thanh NA063, qua slaClassInfoZalo_hours (24 gio) thi
+    # thanh NA062. Du lieu demo co ngay sinh co dinh, nen sau vai ngay MOI ho so deu da qua
+    # han - khong dong nao con "trong han" nua, va bo kiem bao "app khong sinh ra NA013"
+    # trong khi khong ai doi mot dong ma nao. Do la do cai dang dung yen bang dong ho dang chay.
+    "NA013": ("DL08",
+              "Chi dung tu luc giao ho so xep lop den khi het han (slaPLR48_hours / "
+              "slaClassInfoZalo_hours). Qua han la doi sang NA063 / NA062, nen du lieu demo "
+              "tinh khong giu duoc tinh huong nay - bo kiem se do hay xanh tuy vao NGAY chay, "
+              "khong lien quan gi den ma nguon.",
+              {"onboarding_id": "OB-PROBE13", "student_id": "HV001",
+               "student_id_name": "Dong dung san", "enrollment_id": "",
+               "onboarding_status": "", "class_id": "", "class_info_sent_at": "",
+               "class_confirmation_status": "", "confirmation_time": "",
+               "assigned_at": {"__ago_min": 60}}),
+    # Cung ho voi NA013: NA006 la nhanh "CON TRONG HAN" cua don dang ky - qua
+    # slaENR_pending_hours (24 gio) thi thanh NA005, qua slaPayment_hours (48 gio) thi thanh
+    # NA007. Don trong du lieu demo deu da qua han tu lau.
+    "NA006": ("DL06",
+              "Chi dung tu luc tao don den khi het han xac nhan / thu tien (slaENR_pending_hours "
+              "/ slaPayment_hours). Qua han la doi sang NA005 / NA007, nen du lieu demo tinh "
+              "khong giu duoc tinh huong nay.",
+              {"enrollment_id": "ENR-PROBE06", "student_id": "HV001", "lead_id": "",
+               "student_id_name": "Dong dung san", "enrollment_status": "confirmed (Đã xác nhận)",
+               "paid_amount": 0, "remaining_amount": 5000000, "final_fee": 5000000,
+               "total_fee": 5000000, "enrollment_time": {"__ago_min": 60}}),
+    "NA076": ("DL14",
+              "Chi dung tu luc buoi WOW ket thuc den het han ghi ket qua (slaWowNote_hours). Qua "
+              "han la doi sang NA075, nen du lieu demo tinh khong giu duoc tinh huong nay - bo "
+              "kiem se do do hay xanh tuy vao GIO chay, khong lien quan gi den ma nguon.",
+              {"wow_id": "W-PROBE76", "student_id": "HV001", "student_name": "Dong dung san",
+               "wow_status": "completed (Đã hoàn thành)", "wow_content_note": "",
+               "wow_outcome": "", "quota_deducted": "",
+               "wow_session_date": {"__ago_min": 60}}),
+}
+
+
+def _hd3():
+    """Ma NA co trong so trigger HD3 cua SOP."""
+    z = zipfile.ZipFile(SOP)
+    rels = dict(re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"',
+                           z.read("xl/_rels/workbook.xml.rels").decode("utf-8", "ignore")))
+    sheets = re.findall(r'<sheet name="([^"]+)"[^>]*r:id="(rId\d+)"',
+                        z.read("xl/workbook.xml").decode("utf-8", "ignore"))
+    ss = _sst(z)
+    cell = re.compile(r'<c\b([^>]*?)(?:/>|>(.*?)</c>)', re.S)   # o RONG tu dong: <c .../> - xem _sst
+    val = re.compile(r'<v>(.*?)</v>', re.S)
+    out = {}
+    for name, rid in sheets:
+        if not name.startswith("HD3"):
+            continue
+        xml = z.read("xl/" + rels[rid]).decode("utf-8", "ignore")
+        for row in re.findall(r"<row[^>]*>(.*?)</row>", xml, re.S):
+            vals = []
+            for m in cell.finditer(row):
+                attrs = m.group(1) or ""
+                v = val.search(m.group(2) or "")
+                v = v.group(1) if v else ""
+                if 't="s"' in attrs and v.isdigit() and int(v) < len(ss):
+                    v = ss[int(v)]
+                vals.append(v)
+            ma = [str(x).strip() for x in vals if re.match(r"^NA\d+$", str(x).strip())]
+            if ma and ma[0] not in out:
+                mota = [str(x).strip() for x in vals
+                        if len(str(x).strip()) > 18 and not re.match(r"^NA\d+$", str(x).strip())]
+                out[ma[0]] = (mota[0][:70] if mota else "")
+    return out
+
+
+TRIG = _hd3()
+SINH = set()
+SYNRA = {}
+if TRIG:
+    js = os.path.join(SD, "_APP.js")
+    if not os.path.exists(js):
+        raise SystemExit("KHONG THAY _APP.js - chay `python3 extract_js.py` truoc da.")
+    import subprocess
+    probe = r"""
+var El=function(){return{style:{},classList:{add:function(){},remove:function(){},contains:function(){return false}},
+ setAttribute:function(){},getAttribute:function(){return null},appendChild:function(){},
+ querySelector:function(){return El()},querySelectorAll:function(){return[]},addEventListener:function(){},
+ innerHTML:"",textContent:"",value:""}};
+global.document={getElementById:function(){return El()},querySelector:function(){return El()},
+ querySelectorAll:function(){return[]},createElement:function(){return El()},body:El(),addEventListener:function(){}};
+global.window=global;global.location={hash:"",search:""};
+global.localStorage={getItem:function(){return null},setItem:function(){}};
+global.sessionStorage={getItem:function(){return null},setItem:function(){},removeItem:function(){}};
+/* NEO DONG HO VAO NGAY SINH CUA BO DU LIEU - TRUOC khi nap app.
+   Bay da can (02/08): sang chay DAT, chieu cung ngay KHONG DAT o ba tinh huong NA037/NA072/NA073,
+   ca ba deu la "con trong han" - chung HET han dan trong ngay nen ket qua phu thuoc gio chay.
+   Luat: khong do cai dang dung yen bang mot cai thuoc dang chay. */
+(function(){try{
+  var meta=JSON.parse(require("fs").readFileSync("./demo_data_big.json","utf8")).meta||{};
+  var m=String(meta.anchor||"").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+  if(!m)return;
+  var moc=new Date(+m[3],+m[2]-1,+m[1],+(m[4]||0),+(m[5]||0)).getTime(), D=Date;
+  global.Date=function(){return arguments.length?new D(...arguments):new D(moc)};
+  global.Date.now=function(){return moc};
+  global.Date.prototype=D.prototype;global.Date.parse=D.parse;global.Date.UTC=D.UTC;
+}catch(e){}})();
+require("vm").runInThisContext(require("fs").readFileSync(process.argv[2],"utf8"));
+setRole("all");
+var ra={};
+Object.keys(DATA.dl||{}).forEach(function(tb){(DATA.dl[tb]||[]).forEach(function(r){
+  try{var c=naFor(tb,r); if(c)ra[c]=1}catch(e){}})});
+/* dong dung san cho cac tinh huong chi song trong mot cua so ngan */
+function _fmt(d){function p(x){return x<10?"0"+x:x}
+ return p(d.getDate())+"/"+p(d.getMonth()+1)+"/"+d.getFullYear()+" "+p(d.getHours())+":"+p(d.getMinutes())}
+var SYN=JSON.parse(process.argv[3]||"{}"),syn=[];
+Object.keys(SYN).forEach(function(ma){
+ var tb=SYN[ma][0],src=SYN[ma][1],r={};
+ Object.keys(src).forEach(function(k){var v=src[k];
+  if(v&&typeof v==="object"&&v.__ago_min!=null)v=_fmt(new Date(Date.now()-v.__ago_min*60000));
+  r[k]=v});
+ var got="";try{got=naFor(tb,r)||"(rong)"}catch(e){got="LOI:"+e.message}
+ if(got&&got.charAt(0)==="N")ra[got]=1;
+ syn.push(ma+">"+got)});
+console.log("SYN "+syn.join(" "));
+console.log(Object.keys(ra).sort().join(","));
+"""
+    pf = os.path.join(SD, "_probe_na.js")
+    open(pf, "w", encoding="utf-8").write(probe)
+    syn_arg = json.dumps({m: [v[0], v[2]] for m, v in SYNTH.items()}, ensure_ascii=False)
+    try:
+        r = subprocess.run(["node", pf, js, syn_arg], capture_output=True, text=True, cwd=SD, timeout=180)
+        if r.returncode != 0:
+            raise SystemExit("KHONG CHAY DUOC probe naFor:\n" + (r.stderr or "")[-1500:])
+        _out = r.stdout.strip().split("\n")
+        SINH = set(x for x in (_out[-1] or "").split(",") if x)
+        for _l in _out:
+            if _l.startswith("SYN "):
+                for _p in _l[4:].split():
+                    if ">" in _p:
+                        _m, _g = _p.split(">", 1)
+                        SYNRA[_m] = _g
+    finally:
+        try:
+            os.remove(pf)
+        except OSError:
+            pass
+
+# ═══ 13/08 - LY DO BO QUA PHAI CON KHOP VOI SOP ════════════════════════════════════════════
+# Bo kiem cu chi hoi "ma nay co trong danh sach bo qua khong" - KHONG BAO GIO hoi "ly do khai o
+# do con dung khong". Do that: **5/6 ly do khong chia se MOT CHU nao voi tinh huong SOP mo ta**.
+#   NA045  SOP: "Quan tam hoc tiep"      | app khai: "nhan 'khieu nai da dong'"
+#   NA059  SOP: "Dang ky da huy"         | app khai: "nhan 'da hoan tien xong'"
+#   NA069  SOP: "Con han ghi nhan xet"   | app khai: "nhan 'HV da tot nghiep'"
+#   NA074  SOP: "Qua han tru quota"      | app khai: "nhan 'da gui khao sat'"
+#   NA080  SOP: "Uu tien thap qua han"   | app khai: "nhan 'phan hoi tich cuc'"
+# Nguyen nhan: file SOP duoc sua, so hieu NA xe dich, danh sach mien thi nam nguyen. Ket qua la
+# **nam tinh huong nghiep vu that bi mien bang mot to giay phep cap cho viec khac** - va bo kiem
+# xanh suot vi no chi dem ma, khong doc chu.
+# *Mot ban khai mien tru khong duoc kiem thi cai no bao ve khong phai la quyet dinh, ma la quen.*
+def _hd3_rows_all():
+    """Moi hang cua HD3, giu nguyen thu tu cot - de doc duoc cot theo TIEU DE."""
+    z = zipfile.ZipFile(SOP)
+    rels = dict(re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"',
+                           z.read("xl/_rels/workbook.xml.rels").decode("utf-8", "ignore")))
+    sheets = re.findall(r'<sheet name="([^"]+)"[^>]*r:id="(rId\d+)"',
+                        z.read("xl/workbook.xml").decode("utf-8", "ignore"))
+    ss = _sst(z)
+    cell = re.compile(r'<c\b([^>]*?)(?:/>|>(.*?)</c>)', re.S)
+    val = re.compile(r'<v>(.*?)</v>', re.S)
+    out = []
+    for name, rid in sheets:
+        if not name.startswith("HD3"):
+            continue
+        xml = z.read("xl/" + rels[rid]).decode("utf-8", "ignore")
+        for row in re.findall(r"<row[^>]*>(.*?)</row>", xml, re.S):
+            vals = []
+            for m in cell.finditer(row):
+                attrs = m.group(1) or ""
+                v = val.search(m.group(2) or "")
+                v = v.group(1) if v else ""
+                if 't="s"' in attrs and v.isdigit() and int(v) < len(ss):
+                    v = ss[int(v)]
+                vals.append(str(v).strip())
+            out.append(vals)
+    return out
+
+
+def _kd(t):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", str(t or ""))
+                   if unicodedata.category(c) != "Mn").strip()
+
+
+_hd3_all = _hd3_rows_all()
+_i_ma_th = _i_th_th = None
+for _r in _hd3_all:
+    if "Ma" in [_kd(x) for x in _r] and "Tinh huong" in [_kd(x) for x in _r]:
+        _h = [_kd(x) for x in _r]
+        _i_ma_th, _i_th_th = _h.index("Ma"), _h.index("Tinh huong")
+        break
+_hd3_th = {}
+for _r in (_hd3_all if _i_ma_th is not None else []):
+    if len(_r) > max(_i_ma_th, _i_th_th) and re.match(r"^NA\d+$", _r[_i_ma_th].strip()):
+        _hd3_th[_r[_i_ma_th].strip()] = _r[_i_th_th].strip()
+
+
+def _tu(t):
+    return set(w for w in re.sub(r"[^a-z0-9 ]", " ", _kd(t).lower()).split() if len(w) > 2)
+
+
+_lech_ly = []
+for _m in sorted(TRIG_BOQUA):
+    _sop_th = _hd3_th.get(_m, "")
+    _ly = TRIG_BOQUA[_m]
+    _ly = _ly if isinstance(_ly, str) else " ".join(_ly)
+    if _sop_th and not (_tu(_sop_th) & _tu(_ly)):
+        _lech_ly.append((_m, _sop_th, _ly[:70]))
+if _lech_ly:
+    print()
+    print("LY DO BO QUA DA CU - khong con noi ve tinh huong ma SOP dat cho ma do:")
+    for _m, _t, _l in _lech_ly:
+        print("   X %s | SOP goi day la '%s' | app khai '%s'" % (_m, _t, _l))
+    print()
+    print("So hieu NA trong SOP co the da xe dich. Doc lai HD3 roi HOAC lam that tinh huong do, "
+          "HOAC viet lai ly do cho khop. Mot ban khai mien tru sai la mot lo hong LUAT CUNG SO 0.")
+    print("KET QUA: KHONG DAT")
+    sys.exit(1)
+
+thieu = sorted(m for m in TRIG if m not in SINH and m not in TRIG_BOQUA)
+thua = sorted(m for m in TRIG_BOQUA if m in SINH)
+# dong dung san PHAI ra dung ma da hen - ra khac (hoac rong) la nhanh naFor do da hong
+sailech = sorted(m for m in SYNTH if SYNRA.get(m) != m)
+print()
+print("SO TRIGGER HD3 <-> APP")
+print("  tinh huong SOP mo ta : %d" % len(TRIG))
+print("  app SINH RA luc chay : %d" % len([m for m in TRIG if m in SINH]))
+print("  trong do dung bang dong dung san: %d (%s)" % (len(SYNTH), ", ".join(sorted(SYNTH))))
+print("  co y khong sinh (da khai ly do): %d" % len(TRIG_BOQUA))
+if sailech:
+    print()
+    print("DONG DUNG SAN RA SAI MA - nhanh naFor tuong ung da hong:")
+    for m in sailech:
+        print("   X hen %-7s nhung naFor(%s) tra ve %s" % (m, SYNTH[m][0], SYNRA.get(m) or "(khong chay)"))
+    print("KET QUA: KHONG DAT")
+    sys.exit(1)
+if thua:
+    print()
+    print("KHAI TRIG_BOQUA THUA - app DA sinh ra nhung van con trong danh sach bo qua:")
+    for m in thua:
+        print("   - %s   (bo dong nay khoi TRIG_BOQUA)" % m)
+if thieu:
+    print()
+    print("SOT %d TINH HUONG SOP MO TA MA APP KHONG SINH RA:" % len(thieu))
+    for m in thieu:
+        print("   X %-7s %s" % (m, TRIG[m]))
+    print()
+    print("Them luat vao naFor()/slaItems(), HOAC khai vao TRIG_BOQUA trong check_sop.py KEM LY DO.")
+    print("KET QUA: KHONG DAT")
+    sys.exit(1)
+print("KET QUA COT + TRIGGER: DAT")
+
+
+# ═══ PHAN 3: BANG CHI SO BC2 - APP CO TINH DU 51 KPI SOP LIET KE KHONG? ═══════════════
+# Da sot that: BC2 liet ke 51 chi so, app tinh 48. Ba cai hut (LFR, APR, SS_ALL) hut o CA hai
+# noi - khong co cong thuc trong app, cung khong co dong nguong trong CH6 - nen man KPI hien
+# "51 chi so" theo CH6 va nhin nhu du. Ban than SOP cung lech voi chinh no (BC2 51 dong / CH6 48
+# dong), va cai lech do di thang vao app vi app doc CH6.
+KPI_BOQUA = {}
+
+_bc2 = []
+_z = zipfile.ZipFile(SOP)
+_rels = dict(re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"',
+                        _z.read("xl/_rels/workbook.xml.rels").decode("utf-8", "ignore")))
+_sh = dict(re.findall(r'<sheet name="([^"]+)"[^>]*r:id="(rId\d+)"',
+                      _z.read("xl/workbook.xml").decode("utf-8", "ignore")))
+_ss = _sst(_z)
+_cell = re.compile(r'<c\b([^>]*?)(?:/>|>(.*?)</c>)', re.S)   # o RONG tu dong: <c .../> - xem _sst
+_val = re.compile(r'<v>(.*?)</v>', re.S)
+for _nm in [n for n in _sh if n.startswith("BC2")]:
+    _xml = _z.read("xl/" + _rels[_sh[_nm]]).decode("utf-8", "ignore")
+    for _row in re.findall(r"<row[^>]*>(.*?)</row>", _xml, re.S):
+        _v = []
+        for _m in _cell.finditer(_row):
+            _a = _m.group(1) or ""
+            _x = _val.search(_m.group(2) or "")
+            _x = _x.group(1) if _x else ""
+            if 't="s"' in _a and _x.isdigit() and int(_x) < len(_ss):
+                _x = _ss[int(_x)]
+            _v.append(str(_x).strip())
+        if len(_v) > 2 and re.match(r"^P\d+$", _v[0]) and re.match(r"^[A-Z][A-Z0-9_]{1,9}$", _v[1]):
+            if _v[1] not in _bc2:
+                _bc2.append(_v[1])
+
+if _bc2:
+    _src = SRC
+    _thieuKPI = [k for k in _bc2
+                 if not re.search(r"\bv\." + re.escape(k) + r"\s*=", _src) and k not in KPI_BOQUA]
+    # nguong CH6 phai co dong cho tung chi so, khong thi bang KPI khong cham xanh do duoc
+    _dat = json.load(open(os.path.join(SD, "demo_data_big.json"), encoding="utf-8"))
+    _ch6 = {str(c.get("code")) for c in (_dat.get("config", {}).get("ch6") or [])}
+    _thieuTh = [k for k in _bc2 if k not in _ch6 and k not in KPI_BOQUA]
+    print()
+    print("BANG CHI SO BC2 <-> APP")
+    print("  chi so SOP liet ke  : %d" % len(_bc2))
+    print("  app CO cong thuc    : %d" % len([k for k in _bc2 if k not in _thieuKPI]))
+    print("  CH6 co dong nguong  : %d" % len([k for k in _bc2 if k not in _thieuTh]))
+    if _thieuKPI or _thieuTh:
+        print()
+        if _thieuKPI:
+            print("SOT %d CHI SO SOP LIET KE MA APP KHONG TINH:" % len(_thieuKPI))
+            for k in _thieuKPI:
+                print("   X %s" % k)
+        if _thieuTh:
+            print("SOT %d CHI SO KHONG CO DONG NGUONG TRONG CH6:" % len(_thieuTh))
+            for k in _thieuTh:
+                print("   X %s" % k)
+        print()
+        print("Them cong thuc vao kpiCompute() va dong nguong vao CH6 (fixdata §14d-bis),")
+        print("HOAC khai vao KPI_BOQUA trong check_sop.py KEM LY DO.")
+        print("KET QUA: KHONG DAT")
+        sys.exit(1)
+
+print("KET QUA BC2: DAT")
+
+
+# ═══ PHAN 4: BANG PHAN QUYEN CH3 - APP CO CHAN DUNG CHO KHONG? ════════════════════════
+# CH3 la trang "Ai duoc lam gi" cua SOP: 31 hanh dong, trong do 8 hanh dong ghi ro "Quan ly phe
+# duyet". Truoc V9.41 app phan quyen theo TRANG chu khong theo HANH DONG, va chi co DUNG MOT cua
+# duoc canh that (duyet chiet khau) - 7 viec con lai ai mo duoc trang la bam xong. Phan quyen
+# nhin thi co, ma cho dau nhat lai ho.
+# Bo kiem nay lam hai viec:
+#   (a) doi chieu TUNG DONG CH3 voi bang CH3 trong gen_v5.py - lech mot chu la do;
+#   (b) CHAY THAT: dong vai tung chuc danh roi hoi canAct() - viec "Quan ly phe duyet" ma nhan
+#       vien thuong lam duoc la do. Soi ma nguon chi biet "co viet", chay moi biet "co chan".
+CH3_BOQUA = {}
+
+_ch3sop = []
+for _nm3 in [n for n in _sh if n.startswith("CH3")]:
+    for _d3 in _oCua(_z, _rels, _sh[_nm3], _ss):
+        _ten = _d3.get("A", "")
+        if not _ten or len(_ten) < 6 or _ten == "Hanh dong" or _ten.startswith("Hành động"):
+            continue
+        _o = [_d3.get(c, "") for c in "BCDEF"]
+        # dong tieu de nhom ("QUAN LY LEAD & TU VAN") khong co o nao ben phai; con dong hanh dong
+        # thi luon co it nhat mot o - hoac danh dau vai, hoac ghi dieu kien ap dung o cot G.
+        if not any(_o) and not _d3.get("G", ""):
+            continue
+        _ch3sop.append((_ten, ["X" in x.upper() or "duyệt" in x for x in _o]))
+
+_blk3 = re.search(r"var CH3=\[(.*?)\];", SRC, re.S)
+_appCh3 = re.findall(r'\{k:"([a-z0-9_]+)",\s*t:"([^"]+)"', _blk3.group(1) if _blk3 else "")
+_tenApp = [t for _, t in _appCh3]
+_thieuCh3 = [t for t, _ in _ch3sop if t not in _tenApp and t not in CH3_BOQUA]
+_thuaCh3 = [t for t in _tenApp if t not in [x for x, _ in _ch3sop]]
+
+print()
+print("BANG PHAN QUYEN CH3 <-> APP")
+print("  hanh dong SOP mo ta : %d" % len(_ch3sop))
+print("  app co khai         : %d" % len([t for t, _ in _ch3sop if t in _tenApp]))
+
+_ch3loi = []
+if _thieuCh3:
+    _ch3loi += ["SOT hanh dong CH3 app khong khai: " + t for t in _thieuCh3]
+if _thuaCh3:
+    _ch3loi += ["App khai hanh dong KHONG co trong CH3 (sai chinh ta?): " + t for t in _thuaCh3]
+
+# (a-bis) moi viec "Quan ly phe duyet" phai co CUA GHI thuc su goi chanAct - khai bang ma khong
+# chan thi chi la to giay dan tuong. Day dung luat "phan quyen = giau loi vao + tat chuong + CHAN
+# CHINH CUA GHI" da ghi trong 02.
+_duyetK = re.findall(r'\{k:"([a-z0-9_]+)"[^}]*duyet:1', _blk3.group(1) if _blk3 else "")
+_khongChan = [k for k in _duyetK if ('chanAct("%s")' % k) not in SRC]
+if _khongChan:
+    _ch3loi = _ch3loi + ["Viec can Quan ly duyet nhung KHONG cua ghi nao goi chanAct(): " + k
+                         for k in _khongChan]
+
+# (b) chay that
+_pr3 = os.path.join(SD, "_probe_ch3.js")
+open(_pr3, "w", encoding="utf-8").write(r"""
+var El=function(){return{style:{},classList:{add:function(){},remove:function(){},contains:function(){return false}},
+ setAttribute:function(){},getAttribute:function(){return null},appendChild:function(){},
+ querySelector:function(){return El()},querySelectorAll:function(){return[]},addEventListener:function(){},
+ innerHTML:"",textContent:"",value:""}};
+global.document={getElementById:function(){return El()},querySelector:function(){return El()},
+ querySelectorAll:function(){return[]},createElement:function(){return El()},body:El(),addEventListener:function(){}};
+global.window=global;global.location={hash:"",search:""};
+global.localStorage={getItem:function(){return null},setItem:function(){}};
+global.sessionStorage={getItem:function(){return null},setItem:function(){},removeItem:function(){}};
+/* NEO DONG HO VAO NGAY SINH CUA BO DU LIEU - TRUOC khi nap app.
+   Bay da can (02/08): sang chay DAT, chieu cung ngay KHONG DAT o ba tinh huong NA037/NA072/NA073,
+   ca ba deu la "con trong han" - chung HET han dan trong ngay nen ket qua phu thuoc gio chay.
+   Luat: khong do cai dang dung yen bang mot cai thuoc dang chay. */
+(function(){try{
+  var meta=JSON.parse(require("fs").readFileSync("./demo_data_big.json","utf8")).meta||{};
+  var m=String(meta.anchor||"").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+  if(!m)return;
+  var moc=new Date(+m[3],+m[2]-1,+m[1],+(m[4]||0),+(m[5]||0)).getTime(), D=Date;
+  global.Date=function(){return arguments.length?new D(...arguments):new D(moc)};
+  global.Date.now=function(){return moc};
+  global.Date.prototype=D.prototype;global.Date.parse=D.parse;global.Date.UTC=D.UTC;
+}catch(e){}})();
+require("vm").runInThisContext(require("fs").readFileSync(process.argv[2],"utf8"));
+setRole("all");
+var out=[];
+var duyet=CH3.filter(function(a){return a.duyet});
+DATA.dl.DL01.forEach(function(x){
+ applyScope(x.staff_id);var rs=SCOPE();
+ if(rs.pages==="*")return;                      /* quan tri / dieu hanh: toan quyen theo thiet ke */
+ if(rs.mgr)return;                              /* quan ly: co quyen duyet cua nhom minh */
+ duyet.forEach(function(a){if(canAct(a.k))out.push(rs.group+" LAM DUOC "+a.k)});
+});
+console.log("CH3PROBE "+(out.length?out.slice(0,8).join(" | "):"SACH"));
+""")
+try:
+    _r3 = subprocess.run(["node", _pr3, js], capture_output=True, text=True, cwd=SD, timeout=180)
+    _line3 = [l for l in (_r3.stdout or "").split("\n") if l.startswith("CH3PROBE ")]
+    if _r3.returncode != 0 or not _line3:
+        _ch3loi.append("KHONG CHAY DUOC probe CH3: " + (_r3.stderr or "")[-300:])
+    elif _line3[0][9:].strip() != "SACH":
+        _ch3loi.append("Nhan vien thuong VAN LAM DUOC viec can Quan ly duyet: " + _line3[0][9:])
+    else:
+        print("  chay that           : nhan vien thuong khong lam duoc viec nao can duyet")
+finally:
+    try:
+        os.remove(_pr3)
+    except OSError:
+        pass
+
+if _ch3loi:
+    print()
+    for _x in _ch3loi:
+        print("   X %s" % _x)
+    print()
+    print("Sua bang CH3 trong gen_v5.py cho khop SOP, hoac chan them tai cua ghi bang chanAct().")
+    print("KET QUA: KHONG DAT")
+    sys.exit(1)
+
+print("KET QUA CH3: DAT")
+
+
+# ═══ PHAN 5+6: 12 MAN VAN HANH (VH0-VH11) VA 9 BANG BAO CAO (BC1-BC9) ════════════════
+# Bon phan tren canh DU LIEU, LUAT NHAC VIEC, CHI SO va QUYEN. Con thieu mot mat: SOP con mo ta
+# MAN HINH - 12 man tra cuu/hang cho o nhom VH va 9 bang bao cao o nhom BC. Do bang may lan dau:
+#   - VH11 "Khoi luong viec theo NV" khong co man nao (app chi co bang tai GIANG VIEN);
+#   - VH3b "Tra cuu NV WOW" bi gop vao danh sach Giang vien ma khong co duong tach ra;
+#   - BC1 danh sach HV nguy co thieu ba cot QUAN TRONG NHAT (vang may buoi, thieu may bai,
+#     hoat dong cuoi) - vi ba cot do phai DEM tu bang khac chu khong nam san trong DL09;
+#   - BC5-BC9 (bang viec theo chuc danh) khong ton tai: hai khoi `kpiAll` va `ROLEKPI` trong ma
+#     nguon trong y het thu do nhung CHUA BAO GIO DUOC GOI - code chet nam im 9 phien ban.
+#
+# Cach do: VE THAT moi trang, moi tab, moi danh sach, cong them bang viec cua TUNG chuc danh
+# (dong vai tung nguoi), roi tim nhung chuoi PHAI CO. Chuoi chon la thu chi xuat hien khi man do
+# that su duoc dung - khong phai mot tu chung chung de bat gap o trang khac.
+VHBC_BOQUA = {
+    "BC4": "SOP tinh theo THANG LICH; app dung cua so 30 NGAY GAN NHAT (Lead moi 30 ngay, Dang ky "
+           "30 ngay, Doanh thu thang nay + so sanh thang truoc). Cua so truot phan anh dung nhip "
+           "van hanh hon moc dau thang - ngay mung 2 bao cao thang chi co hai ngay du lieu.",
+}
+VHBC = {
+    # V9.52: cach goi o tim da chuan hoa ve MOT kieu duy nhat cho o tim nguoi (anh Luan: "thiet ke
+    # khong dong bo o cac trang, nhin rat roi mat"). Neo lai theo chuoi chuan moi.
+    "VH0": {"t": "Tim kiem nhanh", "can": ["Tìm tên, SĐT hoặc mã"]},
+    "VH1": {"t": "Tra cuu Lop", "can": ["Lớp học (DL10)"]},
+    "VH2": {"t": "Tra cuu Hoc vien", "can": ["Học viên (DL09)"]},
+    "VH3": {"t": "Tra cuu Giang vien", "can": ["Chỉ giảng viên lớp"]},
+    "VH3b": {"t": "Tra cuu NV WOW", "can": ["Chỉ NV WOW"]},
+    "VH4": {"t": "Tra cuu Khach tiem nang", "can": ["Khách tiềm năng (DL02)"]},
+    "VH5": {"t": "Viec - Cham khach", "can": ["Tư vấn cần làm"]},
+    "VH6": {"t": "Viec - Hoc vien nguy co", "can": ["Học viên nguy cơ"]},
+    "VH7": {"t": "Viec - Test cho cham", "can": ["Test chờ chấm"]},
+    "VH8": {"t": "Viec - Thu hoc phi", "can": ["Đơn còn nợ phí"]},
+    "VH9": {"t": "Viec - Lop sap khai giang", "can": ["sắp khai giảng"]},
+    "VH10": {"t": "Viec - Khieu nai", "can": ["Khiếu nại đang xử lý"]},
+    # 14/08 - DOI HAI CHUOI BANG CHUNG, KHONG NOI LONG PHEP DO. SOP mo ta VH11 la "Khoi luong
+    # viec theo NV"; hai chuoi "Lead dang giu" / "Nhap hoc do" chi la BANG CHUNG do nguoi viet
+    # bo kiem chon de chung minh man ay co ve that - SOP khong he bat phai dung dung hai chu ay.
+    # Ma "do" trong tieng Viet doc ra la KEM, trong khi y that la DANG DO; "dang giu" thi lech
+    # voi tu chuan "phu trach" dung o moi cho khac. Doi nhan cho dung tieng Viet, va doi luon
+    # chuoi bang chung theo - GIU nguyen so luong tieu chi, chi doi cai duoc lay lam bang chung.
+    "VH11": {"t": "Khoi luong viec theo NV", "can": ["Khối lượng việc theo nhân viên",
+                                                     "Lead phụ trách", "Nhập học chưa xong"]},
+    "BC1": {"t": "Bang HV nguy co 2 truc", "can": ["Vắng (buổi)", "Thiếu bài", "Hoạt động cuối"]},
+    "BC2": {"t": "Bang chi so KPI", "can": ["KPI theo SOP · CH6"]},
+    "BC3": {"t": "Pheu khach tiem nang", "can": ["Phễu"]},
+    "BC5": {"t": "Bang NV Tu van", "can": ["Bảng NV Tư vấn", "Lead mới (chưa LH)", "Test sắp tới"]},
+    "BC6": {"t": "Bang NV WOW", "can": ["Bảng NV WOW", "WOW có tiến bộ"]},
+    "BC7": {"t": "Bang Giang vien", "can": ["Bảng Giảng viên", "Cần viết nhận xét buổi"]},
+    "BC8": {"t": "Bang Hoc vu", "can": ["Bảng Học vụ", "Phản hồi chờ phân loại"]},
+    # V9.64: truoc day cho khop nguyen van "Doi lop tu 2 lan". So 2 nay nay la THAM SO CH2
+    # (placementChange_free_times + 1) - anh Luan doi thanh 3 la o the doi chu, con bo kiem thi do
+    # va do vi mot ly do khong lien quan gi toi chat luong app. Neo vao phan DUNG YEN cua ten o.
+    "BC9": {"t": "Bang Quan ly", "can": ["Chiết khấu cần duyệt", "Đổi lớp từ",
+                                         "Khiếu nại mức CAO", "Khiếu nại đã leo thang"]},
+}
+
+_sopVH = sorted(set(n.split(".")[0] for n in _sh if re.match(r"^(VH|BC)\d", n)))
+_khaiThieu = [m for m in _sopVH if m not in VHBC and m not in VHBC_BOQUA]
+_khaiThua = [m for m in VHBC if m not in _sopVH]
+print()
+print("MAN VAN HANH VH + BANG BAO CAO BC <-> APP")
+print("  SOP mo ta   : %d man/bang" % len(_sopVH))
+print("  app da khai : %d (%d khai ly do co y khac)" % (len(VHBC), len(VHBC_BOQUA)))
+_vhloi = []
+if _khaiThieu:
+    _vhloi += ["SOP co man/bang ma check nay chua khai: " + m for m in _khaiThieu]
+if _khaiThua:
+    _vhloi += ["Khai mot man/bang KHONG co trong SOP: " + m for m in _khaiThua]
+
+_spec = os.path.join(SD, "_vhbc_spec.json")
+open(_spec, "w", encoding="utf-8").write(json.dumps(VHBC, ensure_ascii=False))
+try:
+    _r5 = subprocess.run(["node", os.path.join(SD, "_probe_vhbc.js"), _spec],
+                         capture_output=True, text=True, cwd=SD, timeout=300)
+    _l5 = [l for l in (_r5.stdout or "").split("\n") if l.startswith("VHBC ")]
+    if _r5.returncode != 0 or not _l5:
+        _vhloi.append("KHONG CHAY DUOC probe VH/BC: " + (_r5.stderr or "")[-400:])
+    elif _l5[0][5:].strip() != "DU":
+        for _x in _l5[0][5:].split(" || "):
+            _vhloi.append(_x)
+    else:
+        print("  ve that      : moi man/bang deu hien ra duoc")
+finally:
+    try:
+        os.remove(_spec)
+    except OSError:
+        pass
+
+if _vhloi:
+    print()
+    for _x in _vhloi:
+        print("   X %s" % _x)
+    print()
+    print("Dung man/bang do trong gen_v5.py, HOAC khai vao VHBC_BOQUA KEM LY DO.")
+    print("KET QUA: KHONG DAT")
+    sys.exit(1)
+
+
+# ═══ PHAN 6: CH5 THUAT NGU - APP CO CHO TRA NGHIA KHONG? ═════════════════════════════════════
+# Them 10/08. Truoc do khong phep do nao doc sheet CH5, va hoa ra app **khong co cho nao tra
+# nghia mot chu viet tat** - trong khi 12 ma trong so do (GLA, CVT, PLR48, OBT, VLR, TAR, ARR,
+# CIR, RR, ENR, FB, TV) CO chay trong app, hien len man duoi dang "GLA qua han", ma khong mot
+# dong nao noi GLA la gi. Nguoi moi doc man hinh xong khong tra duoc.
+# Cung ho voi DL19: mot sheet SOP ma khong mat nao cua bo kiem soi toi.
+print()
+print("=" * 78)
+print("CH5 THUAT NGU <-> APP")
+CH5_BOQUA = {}
+_ch5 = []
+try:
+    _z5 = zipfile.ZipFile(SOP)
+    _rl5 = dict(re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"',
+                           _z5.read("xl/_rels/workbook.xml.rels").decode("utf-8", "ignore")))
+    _sh5 = dict((n.split(".")[0], r) for n, r in re.findall(
+        r'<sheet name="([^"]+)"[^>]*r:id="(rId\d+)"',
+        _z5.read("xl/workbook.xml").decode("utf-8", "ignore")))
+    _ss5 = _sst(_z5)
+    _c5 = re.compile(r'<c\b([^>]*?)(?:/>|>(.*?)</c>)', re.S)
+    _v5 = re.compile(r"<v>(.*?)</v>", re.S)
+    for _r in re.findall(r"<row[^>]*>(.*?)</row>",
+                         _z5.read("xl/" + _rl5[_sh5["CH5"]]).decode("utf-8", "ignore"), re.S):
+        _o = []
+        for _m in _c5.finditer(_r):
+            _a = _m.group(1) or ""
+            _x = _v5.search(_m.group(2) or "")
+            _x = _x.group(1) if _x else ""
+            if 't="s"' in _a and _x.isdigit() and int(_x) < len(_ss5):
+                _x = _ss5[int(_x)]
+            _o.append(str(_x).strip())
+        if len(_o) >= 3 and _o[0] and _o[0] != "Viet tat" and _o[0] != "Viết tắt" \
+                and re.match(r"^[A-Za-z][A-Za-z0-9_/-]{1,12}$", _o[0]):
+            _ch5.append((_o[0], _o[2]))
+except Exception as _e:
+    print("  KHONG DOC DUOC sheet CH5: %s" % _e)
+
+print("  chu viet tat SOP    : %d" % len(_ch5))
+_sot5 = []
+for _tat, _nghia in _ch5:
+    if _tat in CH5_BOQUA:
+        continue
+    # Doi CA HAI: chu viet tat VA nghia tieng Viet. Chi doi moi chu viet tat thi "TV" hay "FB"
+    # trung voi hang tram chuoi khac trong ma nguon, va phep do se xanh ma khong canh gi.
+    if ('"%s"' % _tat) not in SRC or ('"%s"' % _nghia) not in SRC:
+        _sot5.append("%s (%s)" % (_tat, _nghia))
+print("  app co giai nghia   : %d" % (len(_ch5) - len(_sot5)))
+if _sot5:
+    print()
+    print("SOT %d CHU VIET TAT SOP MO TA MA APP KHONG GIAI NGHIA:" % len(_sot5))
+    for _x in _sot5:
+        print("   X %s" % _x)
+    print()
+    print("Them vao bang TUDIEN trong gen_v5.py (ghi NGUYEN VAN theo CH5), HOAC khai vao "
+          "CH5_BOQUA KEM LY DO.")
+    print("KET QUA: KHONG DAT")
+    sys.exit(1)
+print("  KET QUA CH5: DAT - moi chu viet tat SOP mo ta deu co cho tra nghia trong app.")
+
+# ═══ MAT THU BAY - CO T "NGUOI PHU TRACH" CUA HD3 (13/08) ══════════════════════════════════
+# Anh Luan hoi *"Sop co noi ko?"* ve chuyen cham ai khi qua SLA. Doc HD3 thi thay no co han mot
+# cot ten "Nguoi phu trach", khai cho 81/95 tinh huong - va app KHONG NHAP MOT DONG NAO cua cot
+# ay. App biet ma NA, biet cau nhac, biet nguong, nhung khong biet AI PHAI LAM. SOP mo ta ma app
+# bo sot: dung thu LUAT CUNG SO 0 cam. Da nhap thanh bang NAPT trong gen_v5.py; muc nay canh cho
+# bang ay khong lech khoi SOP (thieu ma, hoac chep sai chu).
+print()
+print("=" * 78)
+print("MAT 7 - CO T 'NGUOI PHU TRACH' CUA SO TRIGGER HD3 (ai phai lam viec nay)")
+print("=" * 78)
+# Doc lai HD3 nhung lan nay giu CA HANG, de lay duoc cot "Nguoi phu trach" theo dung vi tri
+# tieu de - khong dem cot theo so thu tu cam cung (SOP them mot cot la lech het).
+def _kd(t):
+    """bo dau tieng Viet - so tieu de cot khong phu thuoc dau"""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", str(t or ""))
+                   if unicodedata.category(c) != "Mn").strip()
+
+
+def _hd3_pt():
+    z = zipfile.ZipFile(SOP)
+    rels = dict(re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"',
+                           z.read("xl/_rels/workbook.xml.rels").decode("utf-8", "ignore")))
+    sheets = re.findall(r'<sheet name="([^"]+)"[^>]*r:id="(rId\d+)"',
+                        z.read("xl/workbook.xml").decode("utf-8", "ignore"))
+    ss = _sst(z)
+    cell = re.compile(r'<c\b([^>]*?)(?:/>|>(.*?)</c>)', re.S)
+    val = re.compile(r'<v>(.*?)</v>', re.S)
+    out, hdr = {}, None
+    for name, rid in sheets:
+        if not name.startswith("HD3"):
+            continue
+        xml = z.read("xl/" + rels[rid]).decode("utf-8", "ignore")
+        for row in re.findall(r"<row[^>]*>(.*?)</row>", xml, re.S):
+            vals = []
+            for m in cell.finditer(row):
+                attrs = m.group(1) or ""
+                v = val.search(m.group(2) or "")
+                v = v.group(1) if v else ""
+                if 't="s"' in attrs and v.isdigit() and int(v) < len(ss):
+                    v = ss[int(v)]
+                vals.append(str(v).strip())
+            if hdr is None and "Nguoi phu trach" in [_kd(x) for x in vals]:
+                hdr = [_kd(x) for x in vals]
+                continue
+            if hdr is None:
+                continue
+            try:
+                i_ma = hdr.index("Ma")
+                i_pt = hdr.index("Nguoi phu trach")
+            except ValueError:
+                continue
+            if len(vals) <= max(i_ma, i_pt):
+                continue
+            ma = vals[i_ma]
+            if not re.match(r"^NA\d+$", ma):
+                continue
+            ph = vals[i_pt]
+            if ph and ph != "-":
+                out[ma] = ph
+    return out
+
+_pt = _hd3_pt()
+_m7 = re.search(r"var NAPT=\{(.*?)\};", SRC, re.S)
+_app7 = {}
+if _m7:
+    for _k, _v in re.findall(r'(NA\d+):"([^"]*)"', _m7.group(1)):
+        _app7[_k] = _v
+print("  SOP khai nguoi phu trach : %d tinh huong" % len(_pt))
+print("  app nhap duoc            : %d" % len(_app7))
+_sot7 = [m for m in sorted(_pt) if m not in _app7]
+_lech7 = [(m, _pt[m], _app7[m]) for m in sorted(_pt) if m in _app7 and _app7[m] != _pt[m]]
+if _sot7 or _lech7:
+    print()
+    if _sot7:
+        print("SOT %d MA - SOP khai nguoi phu trach ma app khong co:" % len(_sot7))
+        for _x in _sot7[:12]:
+            print("   X %s -> SOP ghi '%s'" % (_x, _pt[_x]))
+    if _lech7:
+        print("LECH %d MA - app chep khac SOP:" % len(_lech7))
+        for _x in _lech7[:12]:
+            print("   X %s | SOP: '%s' | app: '%s'" % _x)
+    print()
+    print("Sua bang NAPT trong gen_v5.py cho khop NGUYEN VAN cot 'Nguoi phu trach' cua HD3.")
+    print("KET QUA: KHONG DAT")
+    sys.exit(1)
+print("  KET QUA MAT 7: DAT - moi tinh huong SOP giao cho ai, app deu biet.")
+
+# ═══ MAT THU TAM - BON SHEET CAU HINH CH1 / CH2 / CH4 / CH6 (13/08) ════════════════════════
+# Anh Luan hoi: *"Tuc la, e chua phu duoc toan bo sop, e ko du kha nang do ha, hay e chua audit
+# day du"*. Do that thi ra cau tra loi thu ba: **audit do SO DONG QUA DUOC, chua bao gio do SO
+# CAU HOI DUOC DAT.** Do lai theo sheet: 45/52 sheet co it nhat mot mat hoi toi, 7 sheet khong
+# mat nao hoi - va bon trong so do la CH1 / CH2 / CH4 / CH6, tuc **bon LUAT CUNG cua du an**
+# (moi hang so qua paramOf · cau nhac qua msgText · nguong KPI qua kpiTh · nhan enum nguyen van
+# theo CH1). App co ban sao noi bo cua ca bon, nhung khong gi kiem ban sao ay con khop goc khong.
+# Do tay luc phat hien: CH2 thieu 25/61 tham so, CH1 thieu 1/57 nhom enum, CH4 thieu 2/94 ma.
+# Mat nay bien phep do tay ay thanh mot cai thuoc chay moi lan.
+CH_BOQUA = {
+    # ═══ Khai o day nhung muc SOP co ma app CO Y khong lam, KEM LY DO doc duoc. ═══
+    # 11 dong "kpiThreshold_*" cua CH2 la BAN TRUNG cua CH6: SOP dat nguong KPI o CA HAI SHEET,
+    # CH2 duoi dang tham so va CH6 duoi dang bang nguong. App di theo CH6 (`kpiTh`) vi do la noi
+    # SOP ghi day du huong dat, phase va cach doc. Lam ca hai la de HAI cho sua cho MOT con so -
+    # dung thu du an cam tu dau ("mot su that, mot cho").
+    "CH2:kpiThreshold_VLR": "trung CH6 (VLR) - app dung CH6 qua kpiTh()",
+    "CH2:kpiThreshold_TAR": "trung CH6 (TAR) - app dung CH6 qua kpiTh()",
+    "CH2:kpiThreshold_CVR": "trung CH6 (CVR) - app dung CH6 qua kpiTh()",
+    "CH2:kpiThreshold_PCR": "trung CH6 (PCR) - app dung CH6 qua kpiTh()",
+    "CH2:kpiThreshold_ATR": "trung CH6 (ATR) - app dung CH6 qua kpiTh()",
+    "CH2:kpiThreshold_UAR": "trung CH6 (UAR) - app dung CH6 qua kpiTh()",
+    "CH2:kpiThreshold_ARR": "trung CH6 (ARR) - app dung CH6 qua kpiTh()",
+    "CH2:kpiThreshold_CIR": "trung CH6 (CIR) - app dung CH6 qua kpiTh()",
+    "CH2:kpiThreshold_RR":  "trung CH6 (RR) - app dung CH6 qua kpiTh()",
+    "CH2:kpiThreshold_RER": "trung CH6 (RER) - app dung CH6 qua kpiTh()",
+    # Hai muc app CO nhung dat ten khac - cung mot khai niem, khong phai thieu:
+    "CH2:thresholdPlacementChange_count":
+        "app dat ten `placementChange_free_times` (so lan doi lop truoc khi phai trinh quan ly)",
+    "CH2:wowQuota_default_sessions":
+        "app luu quota theo TUNG HOC VIEN o cot DL09.wow_quota_default (goi khac nhau thi quota "
+        "khac nhau), khong dung mot con so chung cho ca trung tam",
+}
+print()
+print("=" * 78)
+print("MAT 8 - BON SHEET CAU HINH CH1 / CH2 / CH4 / CH6 (bon luat cung cua du an)")
+print("=" * 78)
+
+
+def _sheet_rows(pre):
+    z = zipfile.ZipFile(SOP)
+    rels = dict(re.findall(r'Id="(rId\d+)"[^>]*Target="([^"]+)"',
+                           z.read("xl/_rels/workbook.xml.rels").decode("utf-8", "ignore")))
+    sheets = re.findall(r'<sheet name="([^"]+)"[^>]*r:id="(rId\d+)"',
+                        z.read("xl/workbook.xml").decode("utf-8", "ignore"))
+    ss = _sst(z)
+    cell = re.compile(r'<c\b([^>]*?)(?:/>|>(.*?)</c>)', re.S)
+    val = re.compile(r'<v>(.*?)</v>', re.S)
+    out = []
+    for name, rid in sheets:
+        if not name.startswith(pre):
+            continue
+        xml = z.read("xl/" + rels[rid]).decode("utf-8", "ignore")
+        for row in re.findall(r"<row[^>]*>(.*?)</row>", xml, re.S):
+            vals = []
+            for m in cell.finditer(row):
+                attrs = m.group(1) or ""
+                v = val.search(m.group(2) or "")
+                v = v.group(1) if v else ""
+                if 't="s"' in attrs and v.isdigit() and int(v) < len(ss):
+                    v = ss[int(v)]
+                vals.append(str(v).strip())
+            out.append(vals)
+    return out
+
+
+_ch = [
+    # (sheet, ten mat, cach lay khoa tu cot 0, cach hoi app)
+    ("CH1", "nhom enum (nhan hien tren man)",
+     lambda v: v.split(" - ")[0].strip() if re.match(r"^[a-z][a-z0-9_]+ - ", v) else "",
+     lambda k: ('"enum_%s"' % k) in SRC or ('"%s"' % k) in SRC),
+    ("CH2", "tham so nghiep vu (paramOf)",
+     lambda v: v if re.match(r"^[a-z][A-Za-z0-9_]{5,}$", v) else "",
+     lambda k: ('"%s"' % k) in SRC),
+    ("CH4", "cau nhac viec (msgText)",
+     lambda v: v if re.match(r"^NA\d+$", v) else "",
+     lambda k: ('"%s"' % k) in SRC),
+    ("CH6", "nguong KPI (kpiTh)",
+     lambda v: v if re.match(r"^[A-Z][A-Z0-9]{1,5}$", v) else "",
+     lambda k: re.search(r"\b%s\b" % re.escape(k), SRC) is not None),
+]
+_sot8 = []
+for _pre, _ten, _lay, _hoi in _ch:
+    _keys, _seen = [], set()
+    for _r in _sheet_rows(_pre):
+        if not _r:
+            continue
+        _k = _lay(_r[0])
+        if _k and _k not in _seen:
+            _seen.add(_k)
+            _keys.append(_k)
+    _thieu = [k for k in _keys if not _hoi(k) and (_pre + ":" + k) not in CH_BOQUA]
+    print("  %-4s %-34s SOP %3d | app %3d | thieu %d"
+          % (_pre, _ten, len(_keys), len(_keys) - len(_thieu), len(_thieu)))
+    if _thieu:
+        _sot8.append((_pre, _ten, _thieu))
+if _sot8:
+    print()
+    for _pre, _ten, _thieu in _sot8:
+        print("SOT %d muc o %s (%s):" % (len(_thieu), _pre, _ten))
+        for _x in _thieu[:25]:
+            print("   X %s" % _x)
+        if len(_thieu) > 25:
+            print("   ... con %d muc nua" % (len(_thieu) - 25))
+    print()
+    print("Them vao app (CH2 -> bang tham so o man Cai dat; CH4 -> bang cau nhac; CH6 -> bang "
+          "nguong; CH1 -> bang enum), HOAC khai vao CH_BOQUA trong check_sop.py KEM LY DO.")
+    print("KET QUA: KHONG DAT")
+    sys.exit(1)
+print("  KET QUA MAT 8: DAT - bon sheet cau hinh deu duoc app phu, hoac da khai ly do.")
+
+print()
+print("KET QUA: DAT - cot SOP, so trigger HD3, chi so BC2, phan quyen CH3, man VH, bang BC, "
+      "thuat ngu CH5, nguoi phu trach HD3 va bon sheet cau hinh CH1/CH2/CH4/CH6 deu duoc app "
+      "phu, hoac da khai ly do.")

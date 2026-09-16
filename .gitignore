@@ -1,0 +1,5 @@
+.DS_Store
+_src/_APP.js
+_src/_HV.js
+_src/_thoigian_verify*.txt
+_src/__pycache__/

@@ -1,0 +1,2436 @@
+# -*- coding: utf-8 -*-
+# SINH DEMO MỚI TOÀN BỘ - neo quanh NGÀY CHẠY, phủ đủ tính năng app, liên kết chặt.
+import json, random, datetime as dt, os
+import collections, unicodedata
+
+random.seed(7)
+NOW = dt.datetime.now().replace(second=0, microsecond=0)
+TODAY = NOW.replace(hour=0, minute=0)
+
+def F(d):  # dd/mm/YYYY HH:MM
+    return d.strftime("%d/%m/%Y %H:%M")
+def FD(d): # dd/mm/YYYY
+    return d.strftime("%d/%m/%Y")
+def days(n): return dt.timedelta(days=n)
+
+# GIO CUA MOT BUOI DA HEN LICH
+# BAY DA CAN 09/08, nhin thay tren man Lich tuan: co buoi WOW ghi 01:49 sang va 02:49 sang,
+# con 63/90 buoi thi cung chung phut :49.
+# Goc: NOW giu nguyen GIO PHUT LUC CHAY PIPELINE (hom ay chay luc 07:49), roi moi moc dung bang
+# NOW - n ngay deu thua huong dung cai phut ay. Do duoc 910 moc thoi gian tren toan bo du lieu
+# mang phut :49.
+# SUA CHO DUNG MUC, khong sua tat: phut :49 tren mot lan THU TIEN hay mot CUOC GOI la hoan toan
+# that - nguoi ta tra tien luc 7 gio 49 duoc. Cai vo ly la MOT BUOI DA HEN LICH luc 1 gio 49
+# sang: buoi hoc, buoi WOW, ca test deu la thu trung tam xep truoc theo khung gio day.
+# Nen chi nhung moc ay moi di qua ham nay.
+def gioHoc(d, khung=None):
+    # Dua mot moc thoi gian ve dung khung gio day cua trung tam, giu nguyen NGAY.
+    if khung is None:
+        khung = [9, 15, 17, 19]
+    return d.replace(hour=random.choice(khung), minute=random.choice([0, 0, 30]))
+
+def gioKQ(gio_thi, moc=None):
+    """Gio TRA KET QUA phai sinh ra TU gio thi, khong boc rieng.
+
+    BAY BAT DUOC 10/08 (`check_logic` luat 13c): `graded_wait_consult` va `late` boc `test_date`
+    mot lan va `result_time = NOW - 6..18h` mot lan KHAC. Ma `gioTest` snap gio thi ve khung
+    19:00 mien la truoc NOW - tuc no co the day gio thi MUON HON trong ngay. Hai lan boc doc lap
+    gap nhau la nguoc nhan qua: TB-2026-083 thi 09/08 19:00 ma ket qua ghi 09/08 18:36 -
+    **cham truoc khi thi 24 phut**.
+    Hai con so noi ve mot chuoi nhan qua thi phai TINH TU NHAU, khong duoc boc rieng roi mong
+    chung khong dam nhau."""
+    if moc is None: moc = NOW
+    t = gio_thi + dt.timedelta(hours=random.randint(2, 18))
+    if t > moc: t = moc - dt.timedelta(minutes=random.randint(5, 90))
+    if t <= gio_thi: t = gio_thi + dt.timedelta(minutes=random.randint(45, 120))
+    # CHAM BAI CUNG LA VIEC CUA NGUOI, KHONG AI CHAM LUC 2 GIO SANG. Ban dau cua chinh ham nay
+    # sinh ra `TB-2026-084` cham luc **02:00** - vi cong 2-18 gio vao mot ca thi buoi toi la tran
+    # sang dem. Va sai roi lam sai kieu khac.
+    if t.hour < 8:  t = t.replace(hour=random.randint(8, 11))
+    if t.hour > 21: t = t.replace(hour=random.randint(18, 21))
+    if t <= gio_thi: t = gio_thi + dt.timedelta(minutes=random.randint(45, 120))
+    if t > moc:      t = moc - dt.timedelta(minutes=random.randint(5, 90))
+    return t
+
+def gioTest(d, moc):
+    # Ca test dau vao: keo ve khung gio test (9/14/16/19) ma VAN O QUA KHU so voi `moc`.
+    # Vi sao can rieng ham nay: cac nhanh DL03 dung `NOW - n gio` de dung nen "con han cham bai"
+    # hay "qua han goi lai" - neu chi snap gio mu thi mot ca test 5 gio truoc co the bi day sang
+    # 19h HOM NAY, tuc tuong lai. Da cắn dung loi do o DL14 ngay truoc do.
+    for h in (19, 16, 14, 9):
+        t = d.replace(hour=h, minute=0)
+        if t < moc:
+            return t
+    return (d - dt.timedelta(days=1)).replace(hour=19, minute=0)
+
+# dữ liệu nằm CẠNH script (cùng thư mục gen_v5.py)
+P = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demo_data_big.json")
+
+# ── BẢN GỐC ĐÓNG BĂNG - CẮT VÒNG "ĐỌC LẠI CHÍNH MÌNH" (10/08) ────────────────────────────────
+# Anh Luân: *"Gieo luôn, để mỗi lần a bấm reset demo thì ngon luôn nhỉ"*.
+# Đo trước khi làm thì lòi ra: **ba hạt giống ĐÃ cắm sẵn từ lâu** (`random.seed(7)` ở đây,
+# 20260722 ở `fixdata`, 2307 ở `seed_giaoviec`) mà chạy pipeline hai lần trong CÙNG MỘT PHÚT vẫn
+# ra **23 bảng khác nhau**. Không phải lỗi hạt giống, và cũng không phải thứ tự duyệt `set`
+# (thử với PYTHONHASHSEED cố định: vẫn khác).
+# Gốc: dòng này trước đây đọc `demo_data_big.json` - tức **đầu ra của chính lần chạy trước** -
+# rồi bê nguyên DL01 nhân sự, DL05 khóa, DL10 lớp, DL09, DL02 sang. Pipeline không phải hàm của
+# (hạt giống, ngày chạy) mà là hàm của (hạt giống, ngày chạy, **kết quả lần trước**). Kết quả lần
+# trước lại mang dấu vết của `fixdata` - thế là mỗi lượt chạy trôi thêm một ít, không lượt nào
+# quay lại được. Gieo hạt bao nhiêu cũng không cứu nổi một vòng lặp.
+# Đã chứng minh đúng gốc: giữ NGUYÊN đầu vào rồi chạy `gen_demo` hai lần -> **0 bảng khác**.
+# Nay đọc `demo_base.json`, một bản chụp ĐỨNG YÊN của đúng năm bảng ấy. Sửa giống thì sửa file
+# base (hoặc sửa ở mã sinh), đừng để nó tự bồi đắp qua từng lượt chạy.
+_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demo_base.json")
+if os.path.exists(_BASE):
+    old = json.load(open(_BASE, encoding="utf-8"))
+else:
+    # Không có bản gốc thì vẫn chạy được, nhưng PHẢI kêu lên - im lặng rơi về lối cũ là quay lại
+    # đúng cái vòng lặp vừa cắt, mà không ai hay.
+    print("CANH BAO: khong thay demo_base.json - doc tam demo_data_big.json (ban chay TRUOC), "
+          "ket qua se KHONG lap lai duoc. Dung `python3 lam_base.py` de dung lai ban goc.")
+    old = json.load(open(P, encoding="utf-8"))
+odl = old["dl"] if "dl" in old else old
+
+# ── V9.60: CỔNG NHÂN VIÊN CHỈ GIỮ CÁC BỘ PHẬN CÓ TRONG SOP ────────────────────────────────
+# Anh Luân 31/07: *"chỗ cổng nhân viên, em để quá nhiều chức danh ko liên quan"* · *"tạp vụ thì
+# có liên quan gì đến các nghiệp vụ với học viên đâu, bảo vệ???"* · *"nhân viên IT thì hiện là
+# quản trị hệ thống, là admin rồi, nói chung đây là demo, em gom lại mấy bộ phận quan trọng thôi"*.
+# Đo bằng máy trước khi cắt: bảng phân quyền CH3 của SOP có 31 hành động, chia cho ĐÚNG SÁU chức
+# danh - tuvan, hocvu, giaovien, wow, ketoan, marketing. Nhóm IT / Nhân sự / Bảo vệ / Tạp vụ
+# (7 người) KHÔNG có một hành động nào. Họ vẫn là nhân sự của trung tâm ngoài đời, nhưng trong
+# một app vận hành SOP thì họ không có việc gì để làm, mà vẫn chiếm chỗ ở màn chọn người đăng
+# nhập và vẫn mở được vài trang rỗng.
+# CẮT Ở NGUỒN chứ không giấu ở giao diện: giấu thì dữ liệu vẫn còn, bảng lương và bảng giao việc
+# vẫn trỏ tới họ, và bản sau lại thấy họ ló ra ở một màn nào đó.
+# Vai trò quản trị hệ thống (IT) đã có sẵn tài khoản "Quản trị viên" - không cần người riêng.
+# Giữ: 6 bộ phận có tên trong CH3 + Giám đốc + Nhân sự (anh Luân chốt giữ, có màn riêng: danh
+# sách nhân viên, bảng công giảng dạy, việc nội bộ - không đụng học viên, không đụng doanh thu).
+# Bỏ: IT (đã có sẵn tài khoản Quản trị viên), Bảo vệ, Tạp vụ.
+BOPHAN_SOP = ("sales", "marketing", "academic", "aca_", "teacher", "wow", "account", "ceo", "hr_")
+_bo = [s for s in odl["DL01"] if not str(s.get("role", "")).startswith(BOPHAN_SOP)]
+STAFF = [s for s in odl["DL01"] if str(s.get("role", "")).startswith(BOPHAN_SOP)]
+if _bo:
+    print("Da bo %d nhan su ngoai SOP khoi cong nhan vien: %s"
+          % (len(_bo), ", ".join(sorted({str(x.get("role", "")).split(" (")[0] for x in _bo}))))
+# ═══ V9.99p - ANH LUÂN CHỐT LẠI SƠ ĐỒ LEADER TƯ VẤN (04/08) ═══════════════════════════════
+#   *"Khải leader chi nhánh 2 · Hà leader chi nhánh 3 · Thuyên leader chi nhánh 5"*
+# Ba người trên là TOÀN BỘ leader tư vấn. Phương trước đây là leader Cơ sở 3 nên nay trở lại
+# làm nhân viên tư vấn - danh sách anh đưa chỉ có ba cái tên, mà một cơ sở không thể có hai
+# leader. Sau khi đổi, cơ sở còn LẠI không có leader là Cơ sở 1 và Cơ sở 4.
+# Sửa Ở ĐÂY chứ không sửa tay JSON: chạy lại pipeline là sơ đồ này dựng lại y nguyên.
+LEADER_TUVAN = {
+    "NV020": ("sales_leader (Sale Leader Chi nhánh)", "branch_2 (Cơ sở 2)"),   # Huỳnh Quang Khải
+    "NV021": ("sales_leader (Sale Leader Chi nhánh)", "branch_3 (Cơ sở 3)"),   # Trần Thị Thanh Hà
+    # Anh Luân chốt lần cuối 05/08: *"Khải 2, Hà 3, Thuyên 5 anh nhầm hoài"*.
+    # Ba người có quyền leader là Khải (CS2) - Hà (CS3) - Thuyên (CS5).
+    # Hai cơ sở KHÔNG có leader tư vấn là **Cơ sở 1 và Cơ sở 4**.
+    "NV002": ("sales_leader (Sale Leader Chi nhánh)", "branch_5 (Cơ sở 5)"),   # Nguyễn Văn Thanh Thuyên
+    "NV022": ("sales_staff (NV Tư vấn)",              "branch_3 (Cơ sở 3)"),   # Nguyễn Huỳnh Thanh Phương - thôi leader
+}
+# Anh Luân 04/08: *"Kế toán là Nguyễn Cẩm Ly"* - cửa Kế toán ở cổng vào bằng trưởng bộ phận
+# kế toán (NV017), nên đổi tên đúng người đứng sau cửa ấy.
+DOI_TEN = {"NV017": "Nguyễn Cẩm Ly"}
+for _st in STAFF:
+    _kw = LEADER_TUVAN.get(_st.get("staff_id"))
+    if _kw:
+        _st["role"], _st["branch"] = _kw
+# ═══ V2 12/08 (SALE-8) - CAY BAO CAO CUA PHONG TU VAN PHAI DUNG BA CAP ════════════════════
+# Trưởng phòng Tư vấn: *"phân thành 2 cấp: em thấy hết tất cả các số liệu / leader center: được
+# thấy số liệu của bạn đó và những nhân viên dưới bạn đó"*. Anh Luân chốt phạm vi tính THEO CHI
+# NHÁNH, và bổ sung: *"nếu chi nhánh chưa có leader, thì chỉ mỗi trưởng phòng tư vấn có thể xem"*.
+# Cơ chế trong app (`myTeam`) đã đúng sẵn. Cái SAI nằm ở DỮ LIỆU: đo ra thì cây `reports_to` của
+# phòng Tư vấn lộn xộn - NV024 báo cáo cho NV022 (cũng là nhân viên, không phải leader) · NV022 /
+# NV025 / NV026 báo thẳng Trưởng phòng dù cơ sở của họ CÓ leader · NV023 (Cơ sở 2) lại báo cho
+# leader Cơ sở 3 · NV001 và NV002 không có ai quản.
+# Với cây sai thì cùng một app cho ra hai câu trả lời khác nhau về cùng một câu hỏi phân quyền -
+# và đó đúng là thứ không thể phát hiện bằng mắt. Dựng lại bằng LUẬT, không kê tay từng người:
+#   nhân viên  -> leader CÙNG CƠ SỞ nếu có, không có leader thì báo thẳng Trưởng phòng
+#   leader     -> Trưởng phòng
+#   trưởng phòng -> giữ nguyên (báo cáo lên Giám đốc)
+# Nhờ vậy Cơ sở 1 / Cơ sở 4 / Cơ sở Online không có leader, và số liệu ba nơi đó CHỈ Trưởng phòng
+# xem được - đúng câu anh Luân dặn, không phải viết thêm một dòng luật nào trong app.
+_tvTP = next((s["staff_id"] for s in STAFF if str(s.get("role", "")).startswith("sales_manager")), "")
+_tvLeader = {str(s.get("branch") or ""): s["staff_id"]
+             for s in STAFF if str(s.get("role", "")).startswith("sales_leader")}
+if _tvTP:
+    for _st in STAFF:
+        _r = str(_st.get("role") or "")
+        if _r.startswith("sales_leader"):
+            _st["reports_to"] = _tvTP
+        elif _r.startswith("sales_staff"):
+            _st["reports_to"] = _tvLeader.get(str(_st.get("branch") or ""), _tvTP)
+# ═══ V9.99v - NGƯỜI NGHỈ VIỆC, VIỆC BÀN GIAO LẠI CHO AI ═══════════════════════════════════
+# Anh Luân 05/08: *"Bạn Đào kế toán nghỉ rồi, em đẩy hết dữ liệu demo qua trưởng phòng kế toán
+# luôn nghen"*. Bỏ NGAY Ở ĐÂY, trước khi mọi bảng được sinh ra - như vậy không dòng nào trong
+# 4.000 dòng dữ liệu còn trỏ tới người đã nghỉ, khỏi phải đi vá từng bảng sau.
+# Phòng Kế toán demo nay còn ĐÚNG MỘT người, đúng với cửa "Kế toán" duy nhất ở cổng đăng nhập.
+NGHI_VIEC = {"NV010": "NV017"}      # người nghỉ -> người tiếp nhận
+STAFF = [s for s in STAFF if s.get("staff_id") not in NGHI_VIEC]
+# Cơ sở 5 có leader (Thuyên) mà nhân viên tư vấn duy nhất của cơ sở lại đang "đã nghỉ việc",
+# nên ô "Xem việc của" của leader ấy rỗng - một leader không có ai để quản là vô lý trên demo.
+# Mở lại đúng một người; NV025 và NV027 giữ nguyên trạng thái nghỉ để vẫn còn ca "đã nghỉ việc".
+for _s in STAFF:
+    if _s.get("staff_id") == "NV026":
+        _s["status"] = "active (Đang làm việc)"
+COURSES = odl["DL05"]
+CBY = {c["course_id"]: c for c in COURSES}
+def staff_name(sid):
+    for s in STAFF:
+        if s["staff_id"] == sid: return s.get("full_name", sid)
+    return sid
+SALES = ["NV001","NV002","NV023","NV024","NV025","NV026"]
+SALES_MGR = "NV012"
+# V9.99v - NV010 (Phan Thị Hồng Đào) đã nghỉ, việc bàn giao cho Trưởng phòng Kế toán NV017.
+# Hằng số này cắm cứng mã người nên nếu chỉ xoá người mà quên sửa đây thì mọi dòng
+# `DL07.verified_by` vẫn trỏ tới một mã đã chết - `check_logic.py` bắt được ngay.
+ACCOUNTANT = NGHI_VIEC.get("NV010", "NV010")
+SALES = [x for x in SALES if x not in NGHI_VIEC]
+ACAD = [("NV007","Lê Thị Đức"),("NV008","Nguyễn Thị Hồng Thu")]
+ACAD_IDS=[a[0] for a in ACAD]
+WOWS = [("NV003","Nguyễn Thanh Kiu"),("NV004","Nguyễn Tuấn Phong"),("NV030","Phạm Công Danh")]
+TEACH = {"NV005":"Phan Trung Chính","NV006":"Phạm Tấn Phát","NV031":"Trần Thanh Minh","NV032":"Thạch Đan Tiệp"}
+# 4 GV cho 22 lớp là THIẾU: NV005 ôm 8 lớp, NV006 ôm 7 lớp, 3 lớp trống GV, và NV014
+# (Trưởng phòng ACA) bị kéo vào đứng lớp -> trùng khung giờ là tất yếu (luật 13n/13p).
+# Dựng lịch thật cho cả 22 lớp thì giờ cao điểm (tối T2-T4-T6) có tới 9 lớp chạy song song,
+# nên biên chế đứng lớp phải là 10 GV chứ không phải 4. Chạy lại nhiều lần không nhân đôi.
+_NEW_TEACH = [("NV033","Đặng Minh Khang","khang.gv","ACA.10","01/06/2024"),
+              ("NV034","Bùi Thị Ngọc Hân","han.gv","ACA.11","15/09/2024"),
+              ("NV035","Nguyễn Hoài Thương","thuong.gv","ACA.12","02/01/2025"),
+              ("NV036","Đoàn Minh Khoa","khoa.gv","ACA.13","01/04/2025"),
+              ("NV037","Lương Bảo Ngọc","ngocbao.gv","ACA.14","05/08/2025"),
+              ("NV038","Trịnh Quốc Bảo","baotq.gv","ACA.15","01/11/2025")]
+# Ba cặp nhân sự đang TRÙNG KHÍT họ tên (NV010/NV017 kế toán, NV011/NV018 IT, và 2 ô
+# "(Chưa tuyển)") -> mọi chỗ tra người theo TÊN đều nhập nhằng, báo cáo theo người cộng dồn sai.
+# Tên là thứ người dùng nhìn, phải phân biệt được; ô trống biên chế thì ghi rõ thuộc phòng nào.
+_DUPFIX={"NV017":("Vũ Thị Thanh Huyền","huyen.kt"),
+         "NV018":("Đỗ Nguyên Vũ","vu.it")}
+for _s in STAFF:
+    _f=_DUPFIX.get(_s.get("staff_id"))
+    if _f:
+        _s["full_name"]=_f[0]; _s["email"]=_f[1]+"@ieltsthetutors.edu.vn"
+    if str(_s.get("full_name") or "").strip()=="(Chưa tuyển)":
+        _s["full_name"]="(Chưa tuyển - "+str(_s.get("department") or "?")+")"
+# ═══ V9.99t - BẪY ĐÃ CẮN: HAI KHỐI CÙNG GHI MỘT Ô, KHỐI SAU THẮNG ═══════════════════════════
+# Anh Luân đặt tên Kế toán là "Nguyễn Cẩm Ly" hôm 04/08 và em có ghi vào `DOI_TEN` - nhưng đặt
+# ngay dưới bảng leader, tức là TRƯỚC khối `_DUPFIX` ở đây. `_DUPFIX` cũng ghi `full_name` của
+# đúng NV017 (nó sinh ra để tách hai người trùng tên) nên nó lặng lẽ đè lại "Vũ Thị Thanh Huyền".
+# Chạy pipeline không báo lỗi gì, bộ kiểm cũng không - vì cả hai khối đều "đúng" theo cách của
+# chúng. Chỉ lộ ra khi mở cổng Kế toán và đọc tên người trên màn.
+# Luật: tên do anh Luân đặt là LỜI CUỐI CÙNG - áp sau mọi khối tự sinh khác. Và khi thêm một
+# khối ghi vào ô đã có người ghi, phải đi tìm mọi khối kia trước.
+for _s in STAFF:
+    if _s.get("staff_id") in DOI_TEN:
+        _s["full_name"] = DOI_TEN[_s["staff_id"]]
+        _ho = _s["full_name"].split()[-1].lower()
+        _s["email"] = _ho + ".kt@ieltsthetutors.edu.vn"
+# Cổng học viên phải cho HV biết GV của mình là ai. gvBioEdit trong app đã biết ghi 2 cột này
+# nhưng DL01 chưa bao giờ seed -> thẻ giảng viên bên cổng HV trống trơn.
+_GVBIO=["Chuyên luyện Speaking và phát âm, 6 năm đứng lớp IELTS, IELTS 8.0.",
+        "Thế mạnh Writing Task 2 và tư duy lập luận, 5 năm kinh nghiệm, IELTS 8.5.",
+        "Chuyên Listening và chiến thuật làm đề, đã đưa hơn 200 học viên qua mốc 6.5.",
+        "Chuyên Reading và từ vựng học thuật, bám sát từng học viên yếu.",
+        "Luyện nền tảng cho người mới bắt đầu, kiên nhẫn và đi chậm chắc.",
+        "Chuyên nhóm mục tiêu 7.0+, luyện đề sát format thi thật.",
+        "Chuyên Speaking part 2-3, sửa phát âm theo từng lỗi cá nhân.",
+        "Thế mạnh ngữ pháp và sửa lỗi bài viết chi tiết từng câu.",
+        "Chuyên khóa cấp tốc, kèm sát tiến độ hằng tuần.",
+        "Chuyên Writing Task 1 và mô tả số liệu, chấm bài rất kỹ."]
+for _s in STAFF:
+    _s.setdefault("bio",""); _s.setdefault("avatar_url","")
+# ===== ANH DAI DIEN TU SINH, KHONG GOI RA MANG (V9.31) =====
+# Kiem thu that tren trinh duyet bat duoc: anh dai dien giao vien lay tu ui-avatars.com. Hai cai sai:
+#  (1) mo demo o cho khong co mang thi anh vo;
+#  (2) TEN GIAO VIEN bi gui sang may chu nuoc ngoai moi lan mo trang - du lieu nguoi that,
+#      khong duoc phep ro ri chi de ve mot vong tron co hai chu cai.
+# Nay ve thang bang SVG nhung trong dia chi anh, khong goi ai ca.
+def _avatar(name, bg="1E3A5F", fg="ffffff"):
+    import urllib.parse
+    parts = [p for p in str(name).split() if p]
+    ini = "".join(p[0] for p in parts[-2:]).upper() or "GV"
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'>"
+           "<rect width='96' height='96' rx='48' fill='#%s'/>"
+           "<text x='48' y='48' fill='#%s' font-family='Montserrat,Arial,sans-serif' font-size='38'"
+           " font-weight='700' text-anchor='middle' dominant-baseline='central'>%s</text></svg>"
+           % (bg, fg, ini))
+    return "data:image/svg+xml," + urllib.parse.quote(svg)
+
+_gi=0
+for _s in STAFF:
+    if str(_s.get("role","")).startswith("teacher") or "wow_coach" in str(_s.get("role","")):
+        if not _s.get("bio"):
+            _s["bio"]=_GVBIO[_gi%len(_GVBIO)]; _gi+=1
+        # BAY DUONG ONG: gen_demo DOC LAI demo_data_big.json cua lan truoc, nen dong cu van con
+        # dia chi ui-avatars. Khong chi "thieu thi bu" - phai VA ca dong cu tro ra mang.
+        if not _s.get("avatar_url") or str(_s["avatar_url"]).startswith("http"):
+            _s["avatar_url"]=_avatar(_s.get("full_name","GV"))
+for _tid,_tnm,_tml,_thr,_tsd in _NEW_TEACH:
+    TEACH[_tid]=_tnm          # LUÔN ghi vào bảng GV, kể cả khi DL01 đã có sẵn từ lần chạy trước
+    if any(x.get("staff_id")==_tid for x in STAFF): continue
+    STAFF.append({"staff_id":_tid,"full_name":_tnm,"role":"teacher (Giáo viên ACA)","department":"ACA",
+                  "reports_to":"NV014","branch":"","phone":"0908000"+_tid[2:],
+                  "email":_tml+"@ieltsthetutors.edu.vn","start_date":_tsd,
+                  "status":"active (Đang làm việc)","notes":"Mã HR: "+_thr,"reports_to_name":"Lê Trọng Tín"})
+
+# ---- tên: gom từ demo cũ (đủ thật, có dấu) ----
+# LƯU Ý: name_pool lấy từ file demo CŨ, mà file cũ có thể đã bị mkdemo ghi tên "Demo 1/2/3"
+# vào. Nếu gom cả tên đó thì chúng lọt vào pool rồi được gán ngẫu nhiên cho lead khác ->
+# sinh ra nhiều "Demo 1" không liên quan (vòng lặp tự nhiễm). PHẢI lọc bỏ mọi tên placeholder.
+import re as _re
+def _isPlaceholder(nm):
+    # lọc cả "Demo 1/2/3" (mkdemo ghi vào) lẫn "Nguyễn Văn 123" (fallback cũ) - không cho tái nhiễm
+    return bool(_re.match(r"^\s*Demo\s*\d", nm)) or bool(_re.search(r"\d", nm)) or nm.strip()==""
+name_pool = []
+seen=set()
+for r in odl["DL09"]:
+    n=str(r.get("full_name","")).strip()
+    if n and n not in seen and not _isPlaceholder(n): seen.add(n); name_pool.append(n)
+for r in odl["DL02"]:
+    n=str(r.get("full_name","")).strip()
+    if n and n not in seen and not _isPlaceholder(n): seen.add(n); name_pool.append(n)
+random.shuffle(name_pool)
+name_pool = [n for n in name_pool if n!="Ngô Thanh Tú"]
+# hết pool thì SINH họ tên Việt thật (không bao giờ trả placeholder kiểu "Nguyễn Văn 123")
+_HO=["Nguyễn","Trần","Lê","Phạm","Hoàng","Huỳnh","Phan","Vũ","Võ","Đặng","Bùi","Đỗ","Hồ","Ngô","Dương","Lý","Đinh","Trương","Lâm","Mai","Tạ","Châu","Cao","Thái","Hà"]
+_DEM_M=["Minh","Quốc","Đức","Hữu","Gia","Thanh","Trung","Anh","Bảo","Tuấn","Duy","Khắc","Xuân","Hoài","Nhật","Phúc","Thành","Công","Chí","Đình"]
+_TEN_M=["Khôi","Phong","Long","Nam","Huy","Kiệt","Tùng","Quân","Việt","Sơn","Đạt","Dũng","Thịnh","Toàn","Nghĩa","Khang","Vinh","Lộc","Hiếu","Tín","Phát","Khánh","Trường","Hào","Luân"]
+_DEM_F=["Thị","Thu","Ngọc","Thanh","Phương","Minh","Hồng","Kim","Mỹ","Diễm","Quỳnh","Bảo","Khánh","Thùy","Cẩm","Ánh","Tuyết","Hoài"]
+_TEN_F=["Ngọc","Hà","Anh","Linh","Trang","Vy","Nhi","Chi","My","Thảo","Hạnh","Duyên","Loan","Oanh","Trâm","Tiên","Uyên","Nga","Mai","Hương","Yến","Như","Giang","Thư","Vân","Đan"]
+def take_name():
+    while name_pool:
+        nm=name_pool.pop()
+        if not _isPlaceholder(nm): return nm
+    for _ in range(500):
+        if random.random()<0.5:
+            nm=random.choice(_HO)+" "+random.choice(_DEM_M)+" "+random.choice(_TEN_M)
+        else:
+            nm=random.choice(_HO)+" "+random.choice(_DEM_F)+" "+random.choice(_TEN_F)
+        if nm not in seen:
+            seen.add(nm); return nm
+    # cùng đường (xác suất ~0): ghép thêm tên đệm thứ hai cho khác đi, vẫn là tên thật
+    nm=random.choice(_HO)+" "+random.choice(_DEM_M)+" "+random.choice(_DEM_M).replace("Thị","Văn")+" "+random.choice(_TEN_M)
+    seen.add(nm); return nm
+def phone():
+    return "0"+random.choice(["90","93","97","98","32","33","35","70","76","86"])+"".join(str(random.randint(0,9)) for _ in range(7))
+
+# ================= DL10 LỚP =================
+def sched_days(s):
+    # BẪY cũ: nhánh 'T3 và 5' bắt nhầm cả nhãn "T3-T5" (Ba-Năm) lẫn "T3-5-7" (Ba-Năm-Bảy)
+    # vì "T5" cũng chứa ký tự "5" -> lớp T3-T5 bị đẻ thêm buổi thứ Bảy không có trong lịch
+    # công bố. Phải khớp NGUYÊN nhãn, dài trước ngắn sau.
+    s=s.upper().replace(" ","")
+    if "T7" in s and "CN" in s: return [5,6]
+    if "T3-5-7" in s or "T3-T5-T7" in s: return [1,3,5]
+    if "T3-T5" in s or "T3-5" in s: return [1,3]
+    if "T2" in s: return [0,2,4]
+    return [1,3]
+def sched_hour(s):
+    import re
+    m=re.search(r'(\d{1,2})[Hh:](\d{0,2})', s)
+    h=int(m.group(1)) if m else 19
+    mi=int(m.group(2)) if (m and m.group(2)) else 0
+    return h,mi
+def sched_dur(s):
+    return 3.0 if "9H-12" in s.upper().replace(" ","") else (2.5 if "14H-16H30" in s.upper().replace(" ","") else 1.5)
+
+# V9.59 (anh Luân: "khi a bấm reset ... ở toàn bộ các cổng, đều phải hợp lý"): trước bản này
+# học viên và lead chỉ được gieo vào Cơ sở 1, Cơ sở 2 và Online. Hệ quả đo được: quản lý Cơ sở 3,
+# 4, 5 mở app ra là MÀN TRẮNG - không một học viên, không một lead. Ràng buộc xuyên suốt của dự án
+# là 5 chi nhánh + học online, nên đây là lỗi gieo dữ liệu chứ không phải "demo nhỏ".
+BRANCHES=["branch_1 (Cơ sở 1)","branch_2 (Cơ sở 2)","branch_3 (Cơ sở 3)",
+          "branch_4 (Cơ sở 4)","branch_5 (Cơ sở 5)","online (Cơ sở Online)"]
+CLS = [dict(c) for c in odl["DL10"]]
+
+# ═══ LỚP 1-1 (anh Luân 06/08, TP ACA hỏi qua điện thoại) ═══════════════════════════════════
+# Anh Luân chốt cách phân loại: *"suy ra từ sĩ số để đặt tên thôi em, hiện chỉ có 2 loại: 1-1
+# hoặc nhóm, nên lớp mà có sĩ số max 1 người thì nó là 1-1"*. Nên KHÔNG thêm cột nào vào DL10 -
+# `class_capacity <= 1` LÀ định nghĩa của lớp 1-1, dùng chung cho toàn app.
+# Bản SOP gốc không có lớp nào sĩ số dưới 10, nên TP ACA mở app ra sẽ thấy mảng 1-1 trống trơn.
+# Gieo ở ĐÂY (nguồn pipeline) chứ không vá tay JSON - luật của dự án.
+# Rải đủ ba trạng thái để mọi báo cáo đều có số thật: đang học (giờ dạy + nhận xét), đã kết thúc
+# (điểm đầu ra + tỷ lệ đạt AIM), đang tuyển (lớp sắp khai giảng).
+MOTMOT=[
+ ("LOP-1-1-IELTS-01","IELTS 1-1 Sáng (kèm riêng)",   "CRS-IEL-65","IELTS 6.5","T3-T5, 09h-10h30", "branch_1 (Cơ sở 1)"),
+ ("LOP-1-1-IELTS-02","IELTS 1-1 Tối (kèm riêng)",    "CRS-IEL-70","IELTS 7.0","T2-T6, 19h-20h30", "branch_3 (Cơ sở 3)"),
+ ("LOP-1-1-IELTS-03","IELTS 1-1 Online (kèm riêng)", "CRS-IEL-65","IELTS 6.5","T4-T7, 20h-21h30", "online (Cơ sở Online)"),
+ ("LOP-1-1-PRE-01",  "Pre-IELTS 1-1 (kèm riêng)",    "CRS-PRE-01","Pre-IELTS","T2-T5, 17h-18h30", "branch_2 (Cơ sở 2)"),
+]
+# BƯỚC NÀY PHẢI CHẠY BAO NHIÊU LẦN CŨNG RA MỘT KẾT QUẢ. `gen_demo.py` đọc lại CHÍNH FILE NÓ VỪA
+# SINH (`odl = old["dl"]`), nên "cứ thế append" là mỗi lượt chạy lại đẻ thêm 4 lớp nữa: chạy hai
+# lần ra 8 lớp trùng mã, `check_data` báo LỖI NẶNG. Đã cắn ngay lượt thứ hai.
+_khoaCo={c.get("course_id") for c in CLS}
+_daCo={c.get("class_id") for c in CLS}
+for _cid,_ten,_khoa,_trinh,_lich,_cs in MOTMOT:
+    if _cid in _daCo: continue                    # đã có từ lượt chạy trước - không thêm nữa
+    if _khoa not in _khoaCo:                      # khóa không có thật thì mượn khóa của lớp đầu
+        _khoa=CLS[0].get("course_id")
+    CLS.append({
+        "class_id":_cid,"class_name":_ten,"course_id":_khoa,"class_level":_trinh,
+        "class_schedule":_lich,"class_start_date":"","class_end_date":"",
+        "main_teacher_id":"","class_capacity":1,"current_enrollment":0,
+        "class_status":"","learning_mode":("online (Trực tuyến)" if "Online" in _cs else "offline (Tại trung tâm)"),
+        "branch":_cs,"venue_or_zoom_link":("Link Zoom riêng" if "Online" in _cs else "Phòng kèm 1-1"),
+        "notes":"","course_id_name":""})
+def setc(cid,**kw):
+    for c in CLS:
+        if c["class_id"]==cid:
+            c.update(kw); return c
+RUN = ["LOP-IELTS-6.5-04","LOP-IELTS-6.0-12","LOP-IELTS-7.0-02","LOP-PRE-06","LOP-FOUND-PLA-01","LOP-CRSIEL-18","LOP-1-1-IELTS-01","LOP-1-1-PRE-01"]
+FIN = ["LOP-IELTS-6.5-03","LOP-FOUND-01","LOP-1-1-IELTS-02"]
+OPEN= ["LOP-IELTS-6.0-15","LOP-FOUND-02","LOP-CRSPRI-24","LOP-1-1-IELTS-03"]
+run_start={"LOP-1-1-IELTS-01":-56,"LOP-1-1-PRE-01":-30,"LOP-IELTS-6.5-04":-63,"LOP-IELTS-6.0-12":-49,"LOP-IELTS-7.0-02":-42,"LOP-PRE-06":-35,"LOP-FOUND-PLA-01":-28,"LOP-CRSIEL-18":-21}
+FIN_END={"LOP-IELTS-6.5-03":-20,"LOP-FOUND-01":-55,"LOP-1-1-IELTS-02":-14}   # lớp đã kết thúc: neo NGÀY KẾT THÚC, suy ngược ngày khai giảng
+
+def ses_target(c):
+    """Số buổi HỢP ĐỒNG của khóa (DL05.duration_sessions)."""
+    try: n=int(float(CBY.get(c.get("course_id"),{}).get("duration_sessions") or 0))
+    except Exception: n=0
+    return n or 36
+def span_days(c):
+    """Số ngày lớp phải chạy mới dạy đủ số buổi hợp đồng theo lịch tuần của lớp.
+    Trước đây mọi lớp bị đóng cứng 84 ngày (12 tuần) trong khi khóa ghi 64-128 buổi -
+    ngày kết thúc của lớp mâu thuẫn thẳng với số buổi của khóa."""
+    per=len(sched_days(c["class_schedule"])) or 2
+    return (-(-ses_target(c)//per))*7
+
+# V9.59: SÁU lớp đang chạy, SÁU nơi học - mỗi cơ sở đúng một lớp đang chạy, kể cả Cơ sở 5 và
+# lớp online. Trước bản này Cơ sở 5 không có lớp nào đang chạy, nên quản lý cơ sở đó mở app ra là
+# trắng trơn. Chỗ học của lớp (phòng / link Zoom) và hình thức học do fixdata.py chỉnh cho khớp.
+for _i,(cid,off) in enumerate(run_start.items()):
+    _c=setc(cid,class_status="in_progress (Đang học)",class_start_date=FD(TODAY+days(off)),
+            branch=BRANCHES[_i%len(BRANCHES)])
+    _c["class_end_date"]=FD(TODAY+days(off+span_days(_c)))
+# chia lại GV chủ nhiệm để CẢ 4 GV đều đứng lớp đang chạy (NV032 trước đây không có lớp)
+setc("LOP-PRE-06",main_teacher_id="NV032")
+fin_start={}
+for cid,_eo in FIN_END.items():
+    _c=setc(cid,class_status="finished (Đã kết thúc)")
+    fin_start[cid]=_eo-span_days(_c)
+    _c["class_start_date"]=FD(TODAY+days(fin_start[cid])); _c["class_end_date"]=FD(TODAY+days(_eo))
+for i,cid in enumerate(OPEN):
+    _c=setc(cid,class_status="open (Đang tuyển sinh)",class_start_date=FD(TODAY+days(6+4*i)))
+    _c["class_end_date"]=FD(TODAY+days(6+4*i+span_days(_c)))
+_plan_i=-1
+for c in CLS:
+    if c["class_id"] in RUN+FIN+OPEN: continue
+    if "cancelled" in str(c.get("class_status","")): continue
+    c["class_status"]="planning (Đang lên kế hoạch)"
+    _plan_i=_plan_i+1
+    _kg=25+_plan_i*4
+    c["class_start_date"]=FD(TODAY+days(_kg))
+    # lớp lên kế hoạch VẪN phải có ngày dự kiến kết thúc (trước đây 11 lớp bỏ trống)
+    c["class_end_date"]=FD(TODAY+days(_kg+span_days(c)))
+for c in CLS:
+    c["course_id_name"]=CBY.get(c["course_id"],{}).get("course_name","")
+    if not str(c.get("class_capacity","")).strip(): c["class_capacity"]=14
+
+# ---------- XẾP GIẢNG VIÊN + PHÒNG HỌC KHÔNG TRÙNG (luật 13n / 13p) ----------
+# PHÒNG là thuộc tính của LỚP (DL10.venue_or_zoom_link), không phải của buổi - nên phải gỡ
+# trùng ngay ở mức lớp, đổi phòng từng buổi trong DL11 vô ích. Hai lớp chỉ đụng nhau khi
+# CÙNG khung giờ VÀ khoảng ngày chồng nhau, nên so theo KHOẢNG giờ thật của từng buổi.
+cls_off={}
+for c in CLS:
+    try: _a=(dt.datetime.strptime(c["class_start_date"],"%d/%m/%Y")-TODAY).days
+    except Exception: continue
+    try: _b=(dt.datetime.strptime(c["class_end_date"],"%d/%m/%Y")-TODAY).days
+    except Exception: _b=_a+span_days(c)
+    cls_off[c["class_id"]]=(_a,max(_b,_a))
+ROOMS=["Phòng 202 - Cơ sở 1","Phòng 203 - Cơ sở 1","Phòng 201 - Cơ sở 1","Phòng 103 - Cơ sở 2",
+       "Phòng 105 - Cơ sở 2","Phòng 102 - Cơ sở 2","Phòng 305 - Cơ sở 3","Phòng 302 - Cơ sở 3",
+       "Phòng 303 - Cơ sở 3","Phòng 401 - Cơ sở 4","Phòng 402 - Cơ sở 4","Phòng 403 - Cơ sở 4",
+       "Phòng 501 - Cơ sở 5","Phòng 502 - Cơ sở 5"]
+def cls_slots(c):
+    a,b=cls_off.get(c["class_id"],(None,None))
+    if a is None: return []
+    dows=sched_days(c["class_schedule"]); h,mi=sched_hour(c["class_schedule"]); dur=sched_dur(c["class_schedule"])
+    out=[]; d=TODAY+days(a); end=TODAY+days(b)
+    while d<=end:
+        if d.weekday() in dows:
+            s0=d.replace(hour=h,minute=mi); out.append((s0,s0+dt.timedelta(hours=dur)))
+        d+=days(1)
+    return out
+def _fits(book,key,slots):
+    m=book.get(key)
+    if not m: return True
+    for s0,e0 in slots:
+        for s1,e1 in m.get(s0.date(),()):
+            if s0<e1 and s1<e0: return False
+    return True
+def _book(book,key,slots):
+    m=book.setdefault(key,{})
+    for s0,e0 in slots: m.setdefault(s0.date(),[]).append((s0,e0))
+_bkT={}; _bkR={}; _loadT={}   # _loadT: mỗi giáo viên đang giữ mấy lớp - để chia đều, xem chú thích dưới
+_loadHV={}                    # mỗi giáo viên đang giữ mấy lớp CÓ HỌC VIÊN (đang chạy / đã kết thúc)
+_GHIM_GV={"LOP-PRE-06"}       # lớp ghim tay giáo viên ở trên - không được xếp lại
+_ORDER_GV={t:i for i,t in enumerate(TEACH)}   # TEACH là dict {mã: tên}, giữ thứ tự khai báo
+# TRẦN lớp mỗi giáo viên: chia đều số lớp còn dạy được cho số giáo viên, tối thiểu 2 (một người
+# dạy đúng một lớp thì lịch của họ mỏng quá, không giống một trung tâm thật).
+_CAN_GV=len([c for c in CLS if "cancelled" not in str(c.get("class_status",""))])
+_TRAN_LOP=max(2,-(-_CAN_GV//max(1,len(TEACH))))
+# Xếp lớp KHÓ nhất trước (khoảng chạy dài nhất, khai giảng sớm nhất): greedy "ai đến trước
+# xếp trước" hay kẹt ở lớp cuối vì các lớp ngắn đã chiếm hết GV của khung giờ đó.
+# V9.99m - LỚP CÓ HỌC VIÊN ĐI TRƯỚC. Chia đều SỐ LỚP thôi chưa đủ: nếu mấy lớp đang chạy rơi
+# hết vào ba bốn người thì những người còn lại tuy có lớp nhưng toàn lớp "đang lên kế hoạch",
+# mở app ra vẫn 0 học viên. Lúc xếp lịch chưa biết sĩ số (DL08 gieo sau), nên lấy TRẠNG THÁI
+# lớp làm dấu: đang chạy / đã kết thúc là lớp có người học. Xếp chúng trước, mỗi lớp cho một
+# giáo viên đang ít lớp nhất - thế là chúng trải ra chứ không dồn.
+# "open (Đang tuyển sinh)" cũng vào nhóm này: lớp đang tuyển đã có người ghi danh rồi. Bỏ sót
+# nó thì một lớp có học viên rơi xuống lượt sau và thành lớp thứ hai của người đã có lớp đông.
+_CO_HV=lambda x:0 if ("in_progress" in str(x.get("class_status","")) or
+                      "finished" in str(x.get("class_status","")) or
+                      "open" in str(x.get("class_status",""))) else 1
+# Lớp GHIM TAY xếp trước hết: xếp sau thì lúc tới lượt nó, giáo viên được ghim có thể đã nhận
+# một lớp có học viên rồi - thành ra người ấy ôm hai lớp đông trong khi người khác không có ai.
+for c in sorted(CLS,key=lambda x:(0 if x["class_id"] in _GHIM_GV else 1,
+                                  _CO_HV(x),
+                                  -(cls_off.get(x["class_id"],(0,0))[1]-cls_off.get(x["class_id"],(0,0))[0]),
+                                  cls_off.get(x["class_id"],(0,0))[0])):
+    if "cancelled" in str(c.get("class_status","")):
+        c["venue_or_zoom_link"]="Đã hủy phòng"; c["main_teacher_id"]=""; continue
+    sl=cls_slots(c)
+    if not sl: continue
+    # V9.99m - CHIA LỚP CHO NGƯỜI ÍT LỚP NHẤT TRƯỚC, không phải cho người đầu danh sách.
+    # Cách cũ ("ai rảnh đầu tiên trong TEACH thì lấy") dồn lớp về mấy giáo viên đứng đầu danh
+    # sách: đo được 04/08 - Phan Trung Chính 5 lớp, trong khi Đoàn Minh Khoa, Lương Bảo Ngọc,
+    # Trịnh Quốc Bảo KHÔNG CÓ LỚP NÀO. Ba người ấy đăng nhập vào demo là thấy một app trống
+    # trơn: 0 buổi dạy, 0 học viên, 0 việc. Sáu trên mười giáo viên rơi vào cảnh đó.
+    # Nay xếp cho người đang ít lớp nhất trước - vẫn giữ nguyên luật không đụng lịch, vẫn tôn
+    # trọng lớp đã ghim sẵn giáo viên (_pt), chỉ đổi THỨ TỰ ưu tiên khi có nhiều người cùng rảnh.
+    _gv0=str(c.get("main_teacher_id") or "")
+    # Giữ giáo viên có sẵn CHỪNG NÀO người đó chưa quá phần của mình (_TRAN_LOP), hoặc lớp
+    # được ghim tay ở trên. Quá phần thì lớp này đi tìm người khác - xem chú thích ngay trên.
+    # CHỈ giữ giáo viên có sẵn khi lớp được GHIM TAY. Giá trị thừa hưởng từ file gốc không mang
+    # ý nghĩa nghiệp vụ nào - giữ nó lại thì bốn giáo viên đầu ăn hết lớp, sáu người sau trắng
+    # tay. (Đã thử giữ-nếu-chưa-quá-trần: vẫn còn hai người không lớp nào, vì bốn người kia ôm
+    # đủ trần trước khi tới lượt họ.)
+    _pt=[t for t in [_gv0] if t in TEACH and c["class_id"] in _GHIM_GV]
+    # Lớp CÓ học viên thì ưu tiên người CHƯA có lớp nào có học viên (khoá _loadHV), rồi mới
+    # tới người ít lớp nhất. Chỉ đếm tổng số lớp thôi thì mấy lớp đang chạy vẫn dồn vào vài
+    # người: đo được - 7/10 giáo viên có học viên, 3 người còn lại toàn lớp chưa khai giảng.
+    _cohv=(_CO_HV(c)==0)
+    _rest=sorted([x for x in TEACH if x not in _pt],
+                 key=lambda t:((_loadHV.get(t,0) if _cohv else 0), _loadT.get(t,0), _ORDER_GV[t]))
+    for t in _pt+_rest:
+        if _fits(_bkT,t,sl):
+            c["main_teacher_id"]=t; _book(_bkT,t,sl); _loadT[t]=_loadT.get(t,0)+1
+            if _cohv: _loadHV[t]=_loadHV.get(t,0)+1
+            break
+    else: raise SystemExit("Khong du giao vien de xep lop %s (khung %s, dang co %d GV) - them GV vao _NEW_TEACH"
+                           %(c["class_id"],c["class_schedule"],len(TEACH)))
+    if "online" in str(c.get("learning_mode","")).lower():
+        c["venue_or_zoom_link"]="https://zoom.us/j/"+c["class_id"].lower().replace("lop-","")+" (gửi trước buổi đầu)"
+        continue
+    _pr=[r for r in [str(c.get("venue_or_zoom_link") or "")] if r in ROOMS]
+    for r in _pr+[x for x in ROOMS if x not in _pr]:
+        if _fits(_bkR,r,sl): c["venue_or_zoom_link"]=r; _book(_bkR,r,sl); break
+    else: raise SystemExit("Khong du phong hoc de xep lop %s (khung %s, dang co %d phong) - them vao ROOMS"
+                           %(c["class_id"],c["class_schedule"],len(ROOMS)))
+
+# ================= HỌC VIÊN + ROSTER =================
+# Lớp 1-1 đúng MỘT học viên - đó là định nghĩa của nó. Ghi vào chính bảng sĩ số này để mọi
+# đoạn sau (điểm danh, bài tập, nhận xét, điểm đầu ra) đối xử với nó y như lớp nhóm.
+roster_size={"LOP-IELTS-6.5-04":11,"LOP-IELTS-6.0-12":12,"LOP-IELTS-7.0-02":9,"LOP-PRE-06":10,"LOP-FOUND-PLA-01":9,"LOP-CRSIEL-18":8,
+             "LOP-1-1-IELTS-01":1,"LOP-1-1-PRE-01":1}
+# Lớp 1-1 đã kết thúc cũng phải có ĐÚNG MỘT học viên - không có thì không có điểm đầu ra, mà
+# không có điểm đầu ra thì TP ACA mở "tỷ lệ đạt AIM lớp 1-1" ra là bảng trống.
+fin_size={"LOP-IELTS-6.5-03":6,"LOP-FOUND-01":5,"LOP-1-1-IELTS-02":1}
+students=[]; rosters={cid:[] for cid in list(roster_size)+list(FIN)}
+sid_n=0
+def new_sid():
+    global sid_n; sid_n+=1; return "HV%03d"%sid_n
+def mk_student(name, status, joined_off, course_id):
+    q = CBY.get(course_id,{}).get("wow_quota_default", 5) or 5
+    return {"student_id":new_sid(),"full_name":name,"phone_number":phone(),"email":"","dob":FD(dt.date(random.randint(1998,2008),random.randint(1,12),random.randint(1,28))),
+            "gender":random.choice(["Nam","Nữ"]),"student_type":random.choice(["school_student (Học sinh)","university_student (Sinh viên)","working_people (Người đi làm)"]),
+            "address":"","emergency_contact_name":"","emergency_contact_phone":"","emergency_contact_relation":"",
+            "first_enrollment_id":"","first_enrollment_date":"","total_enrollments":"1",
+            "student_status":status,"joined_at":F(TODAY+days(joined_off)),"branch":random.choice(BRANCHES),
+            "attendance_progress_status":"on_track (Đang đều đặn)","academic_progress_status":"on_track (Đang tiến bộ)",
+            "attendance_risk_reason":"","academic_risk_reason":"","last_learning_activity_time":"","learning_followup_note":"","notes":"",
+            "pause_until":"",
+            "wow_quota_default":str(q),"wow_extra_approved":"0","wow_extra_purchased":"0","wow_quota_used":"0","wow_quota_remaining":str(q),"next_action":""}
+class_course={c["class_id"]:c["course_id"] for c in CLS}
+for cid,nn in roster_size.items():
+    off=run_start[cid]
+    for i in range(nn):
+        s=mk_student(take_name(),"active (Đang học)",off+random.randint(-6,-1),class_course[cid])
+        students.append(s); rosters[cid].append(s["student_id"])
+for cid,nn in fin_size.items():
+    for i in range(nn):
+        # Ngày nhập học phải TRƯỚC ngày khai giảng của lớp. Lớp đã kết thúc nay được dựng đủ số
+        # buổi hợp đồng nên khai giảng lùi khá xa - neo theo fin_start, đừng cắm cứng -115/-155.
+        s=mk_student(take_name(),"completed (Hoàn thành khóa)",fin_start[cid]-random.randint(5,12),class_course[cid])
+        students.append(s); rosters[cid].append(s["student_id"])
+# dropped / transferred (từng thuộc lớp đang học)
+sp=[]
+for i in range(3):
+    cid=RUN[i]; s=mk_student(take_name(),"dropped (Bỏ học giữa chừng)",run_start[cid],class_course[cid]); students.append(s); rosters[cid].append(s["student_id"]); sp.append(("drop",s,cid))
+# 3 ca bảo lưu, hạn bảo lưu (pause_until) trải 3 tình huống: còn xa / sắp hết hạn <=14 ngày / vừa quá hạn
+_PAUSE_OFF=[38,9,-3]
+for i in range(3):
+    cid=RUN[3+i]; s=mk_student(take_name(),"transferred (Bảo lưu/chuyển khóa)",run_start[cid],class_course[cid])
+    s["pause_until"]=FD(TODAY+days(_PAUSE_OFF[i]))
+    students.append(s); rosters[cid].append(s["student_id"]); sp.append(("trans",s,cid))
+# 4 HV mới chuyển đổi (pipeline onboarding)
+fresh=[]
+for i in range(4):
+    s=mk_student(take_name(),"active (Đang học)",-random.randint(0,2),"CRS-IELTS-6.0")
+    students.append(s); fresh.append(s)
+SBY={s["student_id"]:s for s in students}
+
+# ================= LEADS =================
+leads=[]; lid_n=0
+def new_lid():
+    global lid_n; lid_n+=1; return "L-2026-%05d"%lid_n
+SRC=["facebook_ads (Quảng cáo Facebook)","tiktok_ads (Quảng cáo TikTok)","website (Form website ITTs)","zalo_oa (Zalo Official Account)","hotline (Gọi đến hotline)","referral (Giới thiệu)","walk_in (Khách tự đến trực tiếp)"]
+GOAL=["study_abroad (Du học)","job (Công việc)","graduation (Tốt nghiệp)","personal (Cá nhân)"]
+MODE=["online (Trực tuyến)","offline (Tại trung tâm)","hybrid (Kết hợp)"]
+def mk_lead(name,ph,status,created_off,assigned,followup=None,note=""):
+    _ct=TODAY+days(created_off)+dt.timedelta(hours=random.randint(8,20))
+    if _ct>NOW: _ct=NOW-dt.timedelta(hours=random.randint(1,3))   # không sinh lead "đến từ tương lai"
+    return {"lead_id":new_lid(),"lead_created_time":F(_ct),
+        "assigned_to":assigned,"first_call_time":"","full_name":name,"phone_number":ph,"zalo_id":ph,
+        "student_type":random.choice(["school_student (Học sinh)","university_student (Sinh viên)","working_people (Người đi làm)"]),
+        "learning_goal":random.choice(GOAL),"target_band":random.choice(["5.5","6.0","6.5","7.0"]),
+        "expected_start_time":"Tháng "+str(random.choice([8,9,10]))+"/2026","availability_schedule":random.choice(["Tối T2-4-6","Tối T3-5-7","Cuối tuần"]),
+        "learning_mode":random.choice(MODE),"lead_source":random.choice(SRC),
+        "lead_qualification_status":"qualified (Đủ điều kiện)","lead_status":status,
+        "next_followup_time":followup or "","branch":random.choice(BRANCHES),
+        "lead_note":note,"next_action":"","contact_count":"0","last_contact_time":"","view_history":"",
+        "handover_return_to":"","handover_until":"","assigned_to_name":staff_name(assigned)}
+# Ngô Thanh Tú - ca mẫu bàn giao tạm
+tu=mk_lead("Ngô Thanh Tú",phone(),"contacted (Đã liên hệ, đang khai thác)",-12,"NV023",
+    followup=F(TODAY+days(-1)+dt.timedelta(hours=9)),note="Quan tâm khóa 6.5, bận thi cuối kỳ")
+tu["view_history"]="\n".join([
+ F(TODAY+days(-2)+dt.timedelta(hours=8,minutes=15))+": Nguyễn Hoàng Anh Kiệt → Nguyễn Thị Phương Duyên (bởi Phạm Thị Kim Ngân) · Bàn giao TẠM đến hết "+FD(TODAY+days(4))+", tự quay về Nguyễn Hoàng Anh Kiệt · Kiệt đi công tác",
+ F(TODAY+days(-7)+dt.timedelta(hours=9,minutes=20))+": Nguyễn Thị Phương Duyên → Nguyễn Hoàng Anh Kiệt (bởi Phạm Thị Kim Ngân) · Duyên nghỉ phép, chuyển Kiệt tiếp nhận",
+ F(TODAY+days(-9)+dt.timedelta(hours=15,minutes=5))+": Nguyễn Văn Thanh Thuyên → Nguyễn Thị Phương Duyên (bởi Phạm Thị Kim Ngân) · Cân đối tải lead",
+ F(TODAY+days(-10)+dt.timedelta(hours=8,minutes=40))+": Nguyễn Hoàng Anh Kiệt → Nguyễn Văn Thanh Thuyên (bởi Phạm Thị Kim Ngân) · Chia lead theo khu vực"])
+tu["handover_return_to"]="NV001"; tu["handover_until"]=FD(TODAY+days(4))
+leads.append(tu)
+# lead của mỗi học viên (đã chuyển đổi)
+lead_of={}
+for s in students:
+    joined=pvj=dt.datetime.strptime(s["joined_at"],"%d/%m/%Y %H:%M")
+    off=int((pvj-TODAY).days)-random.randint(10,21)
+    L=mk_lead(s["full_name"],s["phone_number"],"converted (Đã thành học viên)",off,random.choice(SALES))
+    leads.append(L); lead_of[s["student_id"]]=L
+# pipeline chưa chuyển đổi
+def batch(n,status,co_range,fu=None,note=""):
+    out=[]
+    for i in range(n):
+        f=None
+        if fu=="overdue": f=F(TODAY+days(-random.randint(1,3))+dt.timedelta(hours=9))
+        # V9.59: cửa sổ hẹn cũ chỉ 0..6 ngày. Demo mở sau đúng một tuần là bàn trực SẠCH hẹn
+        # (đo được: T5, T6, T7, CN đều 0 hẹn liên hệ). Nay trải 0..16 ngày và trải bằng cách CHIA
+        # ĐỀU chứ không bốc ngẫu nhiên - bốc ngẫu nhiên vẫn để lọt ngày trống, mà một ngày trống
+        # là một ngày bàn trực nhìn vào thấy "0 việc" đúng lúc đang mở cho khách xem.
+        # Trải cả về TRƯỚC mốc (-3 ngày): mốc thời gian được kéo theo bội số 7 nên "hôm nay" có
+        # thể rơi vào 1-3 ngày TRƯỚC mốc gieo; không có hẹn ở vùng âm là ngày đó bàn trực trống.
+        elif fu=="soon": f=F(TODAY+days(i%20-3)+dt.timedelta(hours=random.choice([9,14,19])))
+        L=mk_lead(take_name(),phone(),status,-random.randint(*co_range),random.choice(SALES),followup=f,note=note)
+        leads.append(L); out.append(L)
+    return out
+# lead CHƯA GỌI giữ ÍT thôi: mỗi lead mới chưa gọi quá 15 phút là 1 việc đỏ trên chuông.
+# Giữ 2 quá hẹn (cảnh báo có chủ đích) + 2 có hẹn sắp tới + 1 mới trong ngày.
+new_over = batch(1,"new (Chưa liên hệ)",(2,4),fu="overdue")
+new_soon = batch(1,"new (Chưa liên hệ)",(0,2),fu="soon")
+# 3 lead VỪA đổ về 5-30 phút trước giờ build - SLA phản hồi 15 phút đang chạy ngay khi mở app
+fresh_leads=[]
+for _mins in (7,14,26):
+    _L=mk_lead(take_name(),phone(),"new (Chưa liên hệ)",0,random.choice(SALES))
+    _L["lead_created_time"]=F(NOW-dt.timedelta(minutes=_mins))
+    leads.append(_L); fresh_leads.append(_L)
+ctd = batch(46,"contacted (Đã liên hệ, đang khai thác)",(3,30),fu="soon")
+cons= batch(24,"considering (Đang cân nhắc)",(5,35),fu="soon")
+batch(6,"no_response (Không liên lạc được)",(10,50),fu="soon")
+batch(10,"unreachable (Hết cách liên lạc)",(20,60))
+batch(16,"rejected (Từ chối)",(10,60))
+# >=6 lead có lịch hẹn gọi ĐÚNG HÔM NAY (bàn trực "tới hẹn hôm nay" luôn có việc)
+for _L in ctd[2:8]:
+    _L["next_followup_time"]=F(TODAY+dt.timedelta(hours=random.choice([10,14,16,19])))
+# đa dạng mức đủ điều kiện (trước: 100% qualified)
+for L in random.sample(leads,22): L["lead_qualification_status"]="unknown (Chưa rõ)"
+for L in random.sample([x for x in leads if x["lead_status"].startswith(("rejected","no_response"))],7):
+    L["lead_qualification_status"]="unqualified (Không phù hợp)"
+# 1 bàn giao tạm khác
+hv2=ctd[0]; hv2["assigned_to"]="NV024"; hv2["assigned_to_name"]=staff_name("NV024")
+hv2["handover_return_to"]="NV002"; hv2["handover_until"]=FD(TODAY+days(10))
+hv2["view_history"]=F(TODAY+days(-1)+dt.timedelta(hours=10))+": "+staff_name("NV002")+" → "+staff_name("NV024")+" (bởi Phạm Thị Kim Ngân) · Bàn giao TẠM đến hết "+FD(TODAY+days(10))+", tự quay về "+staff_name("NV002")+" · NV nghỉ ốm"
+# thêm nhiều ca bàn giao để bấm dạo dễ gặp (5 vĩnh viễn + 4 tạm có ngày tự quay về)
+HO_REASON=["Cân đối tải lead","NV nghỉ phép","Chuyển theo khu vực","Khách yêu cầu đổi NV","NV chuyển bộ phận"]
+_hocand=[L for L in ctd[1:]+cons if L is not hv2][:60]
+random.shuffle(_hocand)
+for _i,_L in enumerate(_hocand[:9]):
+    _from=random.choice([x for x in SALES if x!=_L["assigned_to"]])
+    _lines=[]
+    _n=random.randint(1,3)
+    for _k in range(_n):
+        _d=NOW-days(random.randint(2,25))-dt.timedelta(hours=random.randint(0,9))
+        _a=random.choice(SALES); _b=random.choice([x for x in SALES if x!=_a])
+        _lines.append(F(_d)+": "+staff_name(_a)+" → "+staff_name(_b)+" (bởi Phạm Thị Kim Ngân) · "+random.choice(HO_REASON))
+    if _i<4:   # bàn giao TẠM, tự quay về
+        _back=random.choice([x for x in SALES if x!=_L["assigned_to"]])
+        _until=TODAY+days(random.randint(2,14))
+        _L["handover_return_to"]=_back; _L["handover_until"]=FD(_until)
+        _lines.append(F(NOW-days(random.randint(0,2)))+": "+staff_name(_back)+" → "+staff_name(_L["assigned_to"])+" (bởi Phạm Thị Kim Ngân) · Bàn giao TẠM đến hết "+FD(_until)+", tự quay về "+staff_name(_back)+" · "+random.choice(["Đi công tác","Nghỉ ốm","Nghỉ phép năm"]))
+    _lines.sort(reverse=True)
+    _L["view_history"]="\n".join(_lines)
+LBY={L["lead_id"]:L for L in leads}
+
+# ================= TOUCHPOINTS =================
+tps=[]; tp_n=0
+CONTENTS=["Gọi giới thiệu khóa học, khách nghe máy","Nhắn Zalo gửi lịch khai giảng","Khách hỏi học phí và lịch học","Tư vấn nhanh lộ trình theo band mục tiêu","Hẹn gọi lại vào buổi tối","Gửi brochure + link test thử","Khách bận, xin gọi lại sau","Xác nhận lịch test đầu vào"]
+RESULTS=["Hẹn gọi lại "+FD(TODAY+days(2)),"Khách quan tâm, gửi thêm tài liệu","Đồng ý đặt lịch test","Chưa nghe máy, thử lại tối","Khách cân nhắc với gia đình"]
+CRES_OK=["connected (Kết nối được (đã nói chuyện/nhắn được))","callback (Khách hẹn gọi lại)"]
+CRES_FAIL=["no_answer (Gọi - không nghe máy)","busy (Máy bận / thuê bao)","sent_waiting (Đã nhắn - chưa trả lời)"]
+def add_tp(L, when, ch=None, res=None):
+    global tp_n; tp_n+=1
+    stf=L["assigned_to"] or random.choice(SALES)
+    tps.append({"touchpoint_id":"TP-%03d"%tp_n,"lead_id":L["lead_id"],"customer_name":L["full_name"],"contact_time":F(when),
+        "channel":ch or random.choice(["phone (Điện thoại)","zalo (Zalo)","facebook (Facebook)"]),
+        "direction":random.choice(["outbound (NV gọi/nhắn đi)","outbound (NV gọi/nhắn đi)","inbound (Khách liên hệ đến)"]),
+        "content":random.choice(CONTENTS),"staff_id":stf,"result_note":res or random.choice(CRES_OK),"staff_id_name":staff_name(stf)})
+for L in leads:
+    st=L["lead_status"].split(" ")[0]
+    n = {"new":0,"contacted":random.randint(1,3),"considering":random.randint(2,4),"no_response":2,"unreachable":3,"rejected":random.randint(1,2),"converted":random.randint(2,5)}.get(st,0)
+    created=dt.datetime.strptime(L["lead_created_time"],"%d/%m/%Y %H:%M")
+    times=sorted(created+dt.timedelta(days=random.uniform(0.05,max(0.2,(NOW-created).days*0.8)),hours=1) for _ in range(n))
+    st_=L["lead_status"].split(" ")[0]
+    for ti_,t in enumerate(times):
+        if t>=NOW: continue
+        if st_ in ("no_response","unreachable"):
+            add_tp(L,t,res=random.choice(CRES_FAIL))
+        elif st_=="rejected" and ti_==0:
+            add_tp(L,t,res=random.choice(CRES_OK))
+        else:
+            add_tp(L,t,res=(random.choice(CRES_FAIL) if random.random()<0.22 and ti_<len(times)-1 else random.choice(CRES_OK)))
+    mine=[t for t in tps if t["lead_id"]==L["lead_id"]]
+    L["contact_count"]=str(len(mine))
+    if mine:
+        L["first_call_time"]=mine[0]["contact_time"]; L["last_contact_time"]=mine[-1]["contact_time"]
+add_tp(tu, NOW-dt.timedelta(days=3,hours=2), "zalo (Zalo)", res="no_answer (Gọi - không nghe máy)")
+tu["contact_count"]=str(int(tu["contact_count"])+1); tu["last_contact_time"]=F(NOW-dt.timedelta(days=3,hours=2)); tu["first_call_time"]=tu["first_call_time"] or tu["last_contact_time"]
+
+# next_action cho lead
+for L in leads:
+    st=L["lead_status"].split(" ")[0]
+    _att=[t for t in tps if t["lead_id"]==L["lead_id"]]
+    _fail=sum(1 for t in _att if str(t.get("result_note","")).split(" ")[0] in ("no_answer","busy","sent_waiting","wrong_number"))
+    if st=="new":
+        if _att:
+            L["next_action"]="Đã gọi %d lần chưa kết nối được. Việc cần làm: gọi lại theo lịch hẹn, quá 3 lần thì đổi kênh Zalo/SMS."%_fail
+        elif L["next_followup_time"] and dt.datetime.strptime(L["next_followup_time"],"%d/%m/%Y %H:%M")<NOW:
+            L["next_action"]="Lead đã giao cho NV nhưng quá 4 giờ (cấu hình slaLeadReassign_hours) chưa gọi. Việc cần làm: gọi gấp hoặc giao lại cho NV khác."
+        else: L["next_action"]="Gọi lần đầu trong 15 phút (slaLRT_minutes) - giới thiệu và mời test miễn phí."
+    elif st=="contacted": L["next_action"]="Gọi lại theo lịch hẹn, mời đặt lịch test đầu vào."
+    elif st=="considering": L["next_action"]="Gửi thêm lộ trình + học phí, hẹn chốt trong tuần."
+    elif st=="no_response": L["next_action"]="Đã gọi %d lần không gặp. Việc cần làm: thử kênh Zalo/SMS khung giờ khác (3 lần theo SOP)."%max(_fail,3)
+# Tú quá hạn gọi
+tu["next_action"]="Đã nhắn Zalo nhưng khách chưa trả lời. Việc cần làm: gọi lại theo lịch hẹn, quá 3 lần thì đổi kênh."
+
+
+# 5 lead "đang gọi dở": vừa gọi hụt 1-2 lần, đến hẹn gọi lại (cho cảnh báo Gọi lại - chưa kết nối)
+for _L in random.sample([x for x in ctd if int(x["contact_count"] or 0)>0][:40],5):
+    for _k in range(random.randint(1,2)):
+        add_tp(_L, NOW-dt.timedelta(hours=random.randint(5,30)), res=random.choice(CRES_FAIL))
+    _L["contact_count"]=str(sum(1 for t in tps if t["lead_id"]==_L["lead_id"]))
+    _L["next_followup_time"]=F(NOW-dt.timedelta(hours=random.randint(1,6)))
+
+# 2 lead "hết cách gọi thường": gọi hụt lần 3 gần đây -> hàng chờ ĐỔI KÊNH (no_contact, đỏ có chủ đích)
+_nr=[x for x in leads if x["lead_status"].startswith("no_response")][:2]
+for _L in _nr:
+    add_tp(_L, NOW-dt.timedelta(hours=random.randint(5,9)), res=random.choice(CRES_FAIL))
+    _L["contact_count"]=str(sum(1 for t in tps if t["lead_id"]==_L["lead_id"]))
+
+# LÀM TƯƠI lần chạm cuối của lead đang khai thác: chuông chỉ réo hồ sơ để nguội thật,
+# phần lớn vừa được chăm (ẩn), một phần chớm hạn (vàng), giữ ~6% quá hạn đỏ có chủ đích.
+_pool=[L for L in leads if L["lead_status"].split(" ")[0] in ("contacted","considering","no_response") and L not in _nr]
+for _L in _pool:
+    _mine=[t for t in tps if t["lead_id"]==_L["lead_id"]]
+    if not _mine: continue
+    _r=random.random()
+    if _r<0.62:   _newt=NOW-dt.timedelta(hours=random.uniform(2,34))    # vừa chăm xong - chưa tới hạn nhắc
+    elif _r<0.94: _newt=NOW-dt.timedelta(hours=random.uniform(38,70))   # chớm hạn - việc vàng
+    else:         _newt=NOW-dt.timedelta(hours=random.uniform(76,108))  # quá hạn theo dõi - việc đỏ có chủ đích
+    _last=max(_mine,key=lambda t:dt.datetime.strptime(t["contact_time"],"%d/%m/%Y %H:%M"))
+    if dt.datetime.strptime(_last["contact_time"],"%d/%m/%Y %H:%M")<_newt:
+        _last["contact_time"]=F(_newt)
+    _times=[dt.datetime.strptime(t["contact_time"],"%d/%m/%Y %H:%M") for t in _mine]
+    _L["last_contact_time"]=F(max(_times)); _L["first_call_time"]=F(min(_times))
+
+# ================= DL03 TEST =================
+tests=[]; tb_n=0
+def add_test(L, kind):
+    global tb_n; tb_n+=1
+    t={"test_booking_id":"TB-2026-%03d"%tb_n,"lead_id":L["lead_id"],"test_date":"","test_format":random.choice(["online (Online (Zoom/LMS))","offline (Offline tại trung tâm)"]),
+       "booking_status":"booked (Đã đặt lịch)","booking_note":"","test_attendance_status":"","test_attendance_time":"","test_no_show_reason":"",
+       "test_status":"pending (Chưa có kết quả)","overall_score":"","skill_listening":"","skill_reading":"","skill_writing":"","skill_speaking":"",
+       "academic_note":"","result_time":"","post_test_status":"","graded_by":"","auto_trigger_hint":"","next_action":"","lead_id_name":L["full_name"]}
+    gv=random.choice(WOWS)
+    # V2 12/08 (SALE-6). Sale: *"chỗ test đầu vào em cần hiện lên tên WOW làm test. Ngoài ra cho
+    # thêm hình thức test: test tại trung tâm hay làm bài thi thật tại hội đồng thi"*.
+    # Hai cột mới, và cả hai đều phải có NGAY LÚC ĐẶT LỊCH - `graded_by` chỉ có sau khi chấm
+    # (42/159 phiếu đang trống) nên nó không trả lời được câu sale cần nói với khách: "em làm
+    # test với thầy nào". Người coi test và người chấm có thể khác nhau, app giữ cả hai.
+    t["test_proctor_id"]=gv[0]; t["test_proctor_name"]=gv[1]
+    t["test_kind"]=("official (Thi thật tại hội đồng)" if random.random()<0.18
+                    else "mock (Thi thử tại trung tâm)")
+    if t["test_kind"].startswith("official"):
+        t["test_format"]="offline (Offline tại trung tâm)"   # thi that thi khong the online
+    if kind=="done":
+        d=dt.datetime.strptime(L["lead_created_time"],"%d/%m/%Y %H:%M")+days(random.randint(2,5)); d=d.replace(hour=9,minute=0)
+        sc=round(random.uniform(3.0,6.0)*2)/2
+        t.update(test_date=F(d),test_attendance_status="on_time (Đúng giờ)",test_attendance_time=F(d),
+            test_status="graded (Đã chấm xong)",overall_score=str(sc),
+            skill_listening=str(max(1,round((sc+random.uniform(-.5,.5))*2)/2)),skill_reading=str(max(1,round((sc+random.uniform(-.5,.5))*2)/2)),
+            skill_writing=str(max(1,round((sc-0.5)*2)/2)),skill_speaking=str(max(1,round((sc+random.uniform(-.5,.5))*2)/2)),
+            academic_note=random.choice(["Nền tảng khá, cần luyện Writing","Phát âm tốt, từ vựng còn mỏng","Ngữ pháp ổn, nghe còn yếu"]),
+            result_time=F(d+days(1)),post_test_status="consulted (Đã tư vấn xong)",graded_by=gv[0])
+    elif kind=="pending_book": t.update(booking_status="pending (Chưa đặt lịch)")
+    elif kind=="future":
+        d=TODAY+days(tb_n%18+1); d=d.replace(hour=random.choice([9,14,19]))   # V9.59: chia đều 18 ngày tới, không bốc ngẫu nhiên
+        t.update(test_date=F(d))
+    elif kind=="await_grade":
+        # Ca test cung phai roi vao gio trung tam mo cua - xem ghi chu o `gioHoc`.
+        # Giu nguyen KHOANG CACH (de con/qua han cham bai), chi keo gio ve khung lam viec.
+        d=NOW-dt.timedelta(hours=random.choice([5,8,11,14,18,20]))
+        d=gioTest(d, NOW)
+        t.update(test_date=F(d),test_attendance_status="on_time (Đúng giờ)",test_attendance_time=F(d))
+    elif kind=="graded_wait_consult":
+        d=gioTest(NOW-dt.timedelta(hours=random.randint(22,40)), NOW); sc=round(random.uniform(3.5,6.0)*2)/2
+        t.update(test_date=F(d),test_attendance_status="on_time (Đúng giờ)",test_attendance_time=F(d),test_status="graded (Đã chấm xong)",
+            overall_score=str(sc),skill_listening=str(sc),skill_reading=str(sc),skill_writing=str(max(1,sc-0.5)),skill_speaking=str(sc),
+            result_time=F(gioKQ(d)),post_test_status="awaiting_consultation (Có KQ, chờ tư vấn)",graded_by=gv[0])
+    elif kind=="noshow":
+        d=gioTest(NOW-dt.timedelta(hours=(15 if tb_n%2 else 40)), NOW)   # 1 ca mới vắng (vàng) + 1 ca quá hạn gọi lại (đỏ)
+        t.update(test_date=F(d),test_attendance_status="no_show (Vắng mặt)",test_no_show_reason=random.choice(["Quên lịch","Bận đột xuất","Không liên lạc được"]),
+                 booking_note=F(d)+": vắng, chờ hẹn lại")
+    elif kind=="rebooked":
+        d0=NOW-dt.timedelta(days=3); d=TODAY+days(random.randint(1,5)); d=d.replace(hour=9)
+        t.update(test_date=F(d),test_no_show_reason="Bận đột xuất",booking_note=F(d0)+": vắng (Bận đột xuất), hẹn lại "+F(d))
+    elif kind=="refused":
+        t.update(booking_status="rejected (Khách từ chối test)",booking_note="Khách muốn tư vấn thẳng, không test")
+    elif kind=="late":
+        d=NOW-days(random.randint(2,6)); sc=round(random.uniform(3.5,5.5)*2)/2
+        t.update(test_date=F(d),test_attendance_status="late (Đến trễ)",test_attendance_time=F(d+dt.timedelta(minutes=25)),
+            test_status="graded (Đã chấm xong)",overall_score=str(sc),skill_listening=str(sc),skill_reading=str(sc),
+            skill_writing=str(max(1,sc-0.5)),skill_speaking=str(sc),result_time=F(gioKQ(d)),
+            post_test_status="consulted (Đã tư vấn xong)",graded_by=gv[0],booking_note="HV đến trễ 25 phút, vẫn kịp làm bài")
+    elif kind=="cancelled_bk":
+        d=NOW-days(random.randint(1,5))
+        t.update(test_date=F(d),booking_status="cancelled (Đã đặt nhưng hủy)",booking_note=F(d-days(1))+": khách báo bận, hủy lịch")
+    elif kind=="today_wait":
+        d=TODAY+dt.timedelta(hours=max(8,NOW.hour-1))
+        t.update(test_date=F(d))
+    elif kind=="today_attended":   # dự test HÔM NAY, đang chờ chấm - việc bấm được ngay khi mở app
+        d=NOW-dt.timedelta(minutes=90)
+        if d<TODAY: d=TODAY+dt.timedelta(minutes=30)   # build lúc rạng sáng thì neo 0h30 hôm nay, KHÔNG để giờ dự tương lai
+        t.update(test_date=F(d),test_attendance_status="on_time (Đúng giờ)",test_attendance_time=F(d))
+    elif kind=="today_later":      # lịch test HÔM NAY nhưng CHƯA tới giờ
+        d=NOW+dt.timedelta(hours=3)
+        if d.date()!=NOW.date(): d=NOW.replace(hour=21,minute=0)
+        t.update(test_date=F(d),booking_note="Đã nhắn Zalo xác nhận, dặn tới sớm 10 phút")
+    tests.append(t); return t
+# 4 HV "fresh" (mới chuyển đổi) được cấp đơn RIÊNG ở khối pipeline onboarding phía dưới.
+# Để lọt vào đây thì mỗi em có 2 đơn và first_enrollment_id bị ghi đè bằng đơn MỚI NHẤT
+# -> hồ sơ HV chỉ ra sai ngày nhập học đầu tiên (luật 11i).
+conv_students=[s for s in students if s not in fresh]
+random.shuffle(conv_students)
+for s in conv_students[:52]:
+    add_test(lead_of[s["student_id"]],"done")
+pipe=[L for L in leads if L["lead_status"].startswith(("contacted","considering"))]
+random.shuffle(pipe)
+pi=iter(pipe)
+for kind,n in [("pending_book",6),("future",18),("await_grade",6),("graded_wait_consult",5),("noshow",2),("rebooked",2),("refused",3),("late",3),("cancelled_bk",2),("today_wait",1),("today_attended",1),("today_later",1)]:
+    for _ in range(n): add_test(next(pi),kind)
+# nối test_booking_id vào phiếu tư vấn (khi lead có test)
+tb_of={}
+for t in tests: tb_of.setdefault(t["lead_id"],t["test_booking_id"])
+
+# ================= DL04 TƯ VẤN =================
+cons_rows=[]; cs_n=0; cons_of={}
+def add_cons(L,kind,course_id=None):
+    global cs_n; cs_n+=1
+    course=CBY.get(course_id or random.choice(["CRS-IELTS-6.0","CRS-IELTS-6.5","CRS-PRE-01"]),{})
+    c={"consultation_id":"CS-2026-%03d"%cs_n,"lead_id":L["lead_id"],"test_booking_id":"","consulted_by":random.choice(SALES),
+       "consultation_status":"consulted (Đã tư vấn xong)","consultation_time":"","recommended_course":course.get("course_name",""),
+       "recommended_duration":str(course.get("duration_months","3"))+" tháng","recommended_schedule":random.choice(["T2-4-6 19h","T3-5-7 19h30","T7+CN sáng"]),
+       "consultation_note":"","conversion_status":"undecided (Chưa quyết định)","conversion_time":"","conversion_note":"","next_action":"","customer_name_display":L["full_name"]}
+    base=dt.datetime.strptime(L["lead_created_time"],"%d/%m/%Y %H:%M")
+    if kind=="won":
+        c.update(consultation_time=F(base+days(random.randint(3,7))),conversion_status="confirmed_with_deposit (Đồng ý + có cọc)",conversion_time=F(base+days(random.randint(4,9))))
+    elif kind=="todo": c.update(consultation_status="not_consulted (Chưa tư vấn)")
+    elif kind=="interested": c.update(consultation_time=F(NOW-dt.timedelta(hours=random.choice([8,20,30,44,58,80]))),conversion_status="interested (Quan tâm, chưa chốt)")
+    elif kind=="dropped": c.update(consultation_time=F(NOW-days(random.randint(3,10))),conversion_status="dropped (Từ chối đăng ký)",conversion_note="Chi phí chưa phù hợp")
+    elif kind=="noresp": c.update(consultation_time=F(NOW-dt.timedelta(hours=random.randint(30,60))),consultation_status="no_response (Không phản hồi)",
+        consultation_note="Đã tư vấn qua điện thoại, gửi lộ trình nhưng khách chưa phản hồi lại")
+    cons_rows.append(c); cons_of.setdefault(L["lead_id"],c["consultation_id"]); return c
+for s in students:
+    add_cons(lead_of[s["student_id"]],"won",class_course.get(next((cid for cid,r in rosters.items() if s["student_id"] in r),None)) )
+for kind,n in [("todo",1),("interested",8),("dropped",4),("noresp",3)]:
+    for _ in range(n): add_cons(next(pi,random.choice(pipe)),kind)
+# NA056 - "Da cham, chua chuyen trang thai": PHAI GIEO CO CHU DICH, dung tien le NA037.
+# App tra NA056 khi hoi du BON dieu kien mot luc: da co diem · post_test_status KHONG rong va
+# chua `consulted` · lead DA CO phieu tu van · va ket qua con TRONG han slaCVT (24h). Truoc nay
+# no duoc phu do MAY - mot bo du lieu doi la mat, va `check_sop` bat ngay (KHONG DAT 10/08).
+# *Mot tinh huong SOP duoc phu do may thi som muon cung mat.* Gieo hai ca cho chac, mot ca doi
+# la van con mot ca.
+_na056=0
+for _t in tests:
+    if _na056>=2: break
+    if not str(_t.get("test_status","")).startswith("graded"): continue
+    if str(_t.get("post_test_status","")).startswith("consulted"): continue
+    _L=next((x for x in leads if x["lead_id"]==_t["lead_id"]), None)
+    if not _L or _L["lead_id"] in cons_of: continue
+    _t["post_test_status"]="awaiting_consultation (Có KQ, chờ tư vấn)"
+    # DAT CA HAI MOC MOT LUOT, dung chinh mot cai roi mong cai kia khong dung. Ban dau em chi ep
+    # `result_time` ve trong han 24h - va no roi TRUOC gio thi o hai phieu (`check_logic` 13c bat
+    # ngay). Nay: keo gio thi ve 12-18h truoc, roi cham sau do 1-3h. Vua thuan nhan qua, vua con
+    # trong han SLA - hai dieu kien ay phai dung CUNG LUC thi moi ra NA056.
+    _thi = gioTest(NOW - dt.timedelta(hours=random.randint(12, 18)), NOW)
+    _kq  = _thi + dt.timedelta(hours=random.randint(1, 3))
+    if _kq >= NOW: _kq = NOW - dt.timedelta(minutes=random.randint(20, 90))
+    if _kq <= _thi: _thi = _kq - dt.timedelta(hours=2)
+    _t["test_date"]=F(_thi)
+    if str(_t.get("test_attendance_time") or "").strip(): _t["test_attendance_time"]=F(_thi)
+    _t["result_time"]=F(_kq)
+    _c=add_cons(_L,"todo")
+    _c["consultation_status"]="not_consulted (Chưa tư vấn)"
+    _na056+=1
+if _na056<2: raise SystemExit("KHONG GIEO DU NA056 (%d/2) - tinh huong SOP nay se mat phu"%_na056)
+
+for c in cons_rows: c["test_booking_id"]=tb_of.get(c["lead_id"],"")
+
+# ================= DL06 + DL07 =================
+enrs=[]; pays=[]; en_n=0; pay_n=0
+def add_enr(L,s,course_id,status="confirmed (Đã xác nhận)",created=None,disc=0,disc_state="none",paykind="paid"):
+    global en_n; en_n+=1
+    course=CBY.get(course_id,{})
+    fee=int(course.get("list_price") or 12000000)
+    final=max(0,fee-disc)
+    created=created or (dt.datetime.strptime(L["lead_created_time"],"%d/%m/%Y %H:%M")+days(random.randint(5,10)))
+    e={"enrollment_id":"ENR-2026-%03d"%en_n,"student_id":s["student_id"] if s else "","lead_id":L["lead_id"],
+       "consultation_id":cons_of.get(L["lead_id"],""),"course_id":course_id,"enrollment_status":status,"enrollment_time":F(created),
+       "total_fee":fee,"discount_amount":disc,"discount_type":"promotion (Khuyến mãi)" if disc else "","discount_reason":"Ưu đãi khai giảng" if disc else "",
+       "discount_approved_by":"","discount_approved_by_name":"","final_fee":final,"paid_amount":0,"remaining_amount":final,"payment_status":"unpaid (Chưa thanh toán)",
+       "next_payment_due":"","cancellation_reason":"","notes":"","auto_trigger_hint":"","next_action":"","discount_approved_at":"",
+       "student_id_name":s["full_name"] if s else L["full_name"],"lead_id_name":L["full_name"],"course_id_name":course.get("course_name","")}
+    # Cột *_by là MÃ nhân viên (NVxxx); TÊN người để ở cột *_name. Ghi tên vào ô mã =
+    # mã chết, app tra ngược ra rỗng (luật 11a). Trạng thái từ chối đọc ở notes + discount_amount.
+    if disc_state=="approved":
+        e["discount_approved_by"]=SALES_MGR; e["discount_approved_by_name"]=staff_name(SALES_MGR)
+        e["discount_approved_at"]=F(created+days(1))
+        e["notes"]="CK "+format(disc,",").replace(",",".")+"đ đã duyệt bởi "+staff_name(SALES_MGR)
+    elif disc_state=="rejected":
+        e["notes"]="CK "+format(disc,",").replace(",",".")+"đ bị từ chối bởi Phạm Thị Kim Ngân"
+        e["discount_approved_by"]=SALES_MGR; e["discount_approved_by_name"]=staff_name(SALES_MGR)
+        e["discount_approved_at"]=F(created+days(1))
+        e["discount_amount"]=0; e["final_fee"]=fee; e["remaining_amount"]=fee
+    enrs.append(e); return e
+def add_pay(e,when,amount,verified=True,method=None,note=""):
+    global pay_n; pay_n+=1
+    m=method or random.choice(["bank_transfer (Chuyển khoản NH)","bank_transfer (Chuyển khoản NH)","bank_transfer (Chuyển khoản NH)","cash (Tiền mặt)","momo (MoMo)","zalopay (ZaloPay)"])
+    fee=random.choice([0,0,0,5500,11000]) if ("momo" in m or "zalopay" in m) else 0
+    rb=random.choice(SALES+ACAD_IDS)
+    p={"payment_id":"PAY-2026-%03d"%pay_n,"enrollment_id":e["enrollment_id"],"student_id":e["student_id"],
+       "lead_id":e.get("lead_id",""),"payment_time":F(when),
+       "payment_method":m,"amount":amount,"transaction_fee":fee,"net_received":amount-fee,
+       "bank_name":random.choice(["VCB","ACB","Techcombank"]) if "bank" in m else "","sender_name":e["student_id_name"],"transaction_ref":"FT"+str(random.randint(10**8,10**9)) if "bank" in m else "",
+       "received_by":rb,"payment_note":note or random.choice(["","","Thu tại quầy","Phụ huynh chuyển hộ",""]),"verified_by":ACCOUNTANT if verified else "","student_id_name":e["student_id_name"],
+       "received_by_name":staff_name(rb),"verified_by_name":staff_name(ACCOUNTANT) if verified else "","next_action":""}
+    pays.append(p)
+    e["paid_amount"]=int(e["paid_amount"])+amount
+    e["remaining_amount"]=max(0,int(e["final_fee"])-int(e["paid_amount"]))
+    e["payment_status"]="paid (Đã thanh toán đủ)" if e["remaining_amount"]==0 else "partial (Đã thanh toán 1 phần)"
+enr_of={}
+disc_plan=(["pend"]*5+["appr"]*4+["rej"]*3)
+random.shuffle(conv_students)
+for i,s in enumerate(conv_students):
+    cid=next((c for c,r in rosters.items() if s["student_id"] in r),None)
+    course=class_course.get(cid,"CRS-IELTS-6.0")
+    ds="none";d=0
+    if i<len(disc_plan):
+        ds={"pend":"none","appr":"approved","rej":"rejected"}[disc_plan[i]]
+        d=random.choice([1000000,1500000,2000000])
+        if disc_plan[i]=="pend": ds="none"
+    e=add_enr(lead_of[s["student_id"]],s,course,disc=d if disc_plan[i:i+1] else 0,disc_state=ds)
+    if i<5: e["discount_approved_by"]=""; e["discount_approved_by_name"]=""; e["discount_approved_at"]=""  # pending duyệt
+    enr_of[s["student_id"]]=e
+    s["first_enrollment_id"]=e["enrollment_id"]; s["first_enrollment_date"]=e["enrollment_time"]
+    en_t=dt.datetime.strptime(e["enrollment_time"],"%d/%m/%Y %H:%M")
+    r=random.random()
+    if r<0.62:
+        if random.random()<0.5: add_pay(e,en_t+days(1),int(e["final_fee"]))
+        else:
+            h=int(e["final_fee"])//2
+            add_pay(e,en_t+days(1),h); add_pay(e,en_t+days(random.randint(15,30)),int(e["final_fee"])-h)
+    elif r<0.9: add_pay(e,en_t+days(1),int(int(e["final_fee"])*random.choice([0.3,0.5])))
+# 2 ca TRẢ GÓP (installment 3 kỳ, còn kỳ cuối)
+for s in random.sample([x for x in conv_students if int(enr_of[x["student_id"]]["paid_amount"])==0],2):
+    e=enr_of[s["student_id"]]; en_t=dt.datetime.strptime(e["enrollment_time"],"%d/%m/%Y %H:%M")
+    k=int(e["final_fee"])//3
+    add_pay(e,en_t+days(1),k,method="installment (Trả góp)",note="Trả góp kỳ 1/3")
+    add_pay(e,en_t+days(30),k,method="installment (Trả góp)",note="Trả góp kỳ 2/3")
+# tái ĐK: 3 HV lớp finished có enrollment thứ 2 (lớp đang chạy) - gồm HV065 (hồ sơ demo 2,
+# cần lớp đang học có buổi sắp tới cho hero "buổi kế tiếp" của cổng học viên)
+re2=[]
+for s in [SBY[r] for r in rosters["LOP-IELTS-6.5-03"][:2]]+[SBY[rosters["LOP-IELTS-6.5-03"][5]]]:
+    e=add_enr(lead_of[s["student_id"]],s,"CRS-IELTS-7.0",created=NOW-days(18)); add_pay(e,NOW-days(17),int(e["final_fee"]))
+    s["total_enrollments"]="2"; s["student_status"]="active (Đang học)"; rosters["LOP-IELTS-7.0-02"].append(s["student_id"]); re2.append((s,e))
+# hủy & hoàn tiền: c1 MỚI hủy 2 ngày (hàng chờ hoàn tiền - bấm được ngay), c2-c3 hủy trước đó đã hoàn
+c1=add_enr(leads[-1],None,"CRS-PRE-01",status="cancelled (Đã hủy)",created=NOW-days(2)); c1["cancellation_reason"]="cancelled_by_student (Học viên tự hủy)"; add_pay(c1,NOW-days(1),3000000)
+c2=add_enr(leads[-2],None,"CRS-IELTS-6.0",status="cancelled (Đã hủy)",created=NOW-days(3)+dt.timedelta(hours=6)); c2["cancellation_reason"]="cancelled_by_student (Học viên tự hủy)"; add_pay(c2,NOW-days(2),5000000)
+c3=add_enr(leads[-3],None,"CRS-IELTS-6.5",status="cancelled (Đã hủy)",created=NOW-days(4)); c3["cancellation_reason"]="cancelled_by_itts (Trung tâm hủy)"; add_pay(c3,NOW-days(3),6000000)
+c3["notes"]="Đã xử lý hoàn tiền "+F(NOW-days(2))+" bởi Phạm Thị Kim Ngân"; c3["payment_status"]="refunded (Đã hoàn tiền)"
+# 5 đăng ký mới chờ thu (chưa xếp lớp): 2 ca đã 4 ngày (nhắc vàng), còn lại mới 0-3 ngày
+pending_enr=[]
+for i in range(5):
+    L=next(pi,random.choice(pipe))
+    e=add_enr(L,None,random.choice(["CRS-IELTS-6.0","CRS-PRE-01"]),status="pending (Đang chờ xác nhận)",created=NOW-days(4 if i<2 else random.randint(0,3)))
+    pending_enr.append(e)
+# fresh students enrollments (đã cọc)
+for s in fresh:
+    e=add_enr(lead_of[s["student_id"]],s,"CRS-IELTS-6.0",created=NOW-days(random.randint(1,3))); add_pay(e,NOW-days(1),2000000)
+    enr_of[s["student_id"]]=e; s["first_enrollment_id"]=e["enrollment_id"]; s["first_enrollment_date"]=e["enrollment_time"]
+# 4 khoản thu chờ xác nhận (mkdemo sẽ thêm 2 cho hồ sơ demo)
+for p in random.sample([p for p in pays if p["verified_by"]],4):
+    p["verified_by"]="";p["verified_by_name"]=""
+# HẸN THU (next_payment_due) cho công nợ: trả góp kỳ cuối 1 hẹn HÔM NAY + 1 quá hạn 1-2 ngày;
+# phần lớn công nợ khác có hẹn thu TƯƠNG LAI (có hẹn thì app chỉ nhắc khi tới hẹn);
+# chừa ~5 hồ sơ KHÔNG hẹn để cảnh báo "nợ quá kỳ hạn" vẫn có hàng.
+_debt=[e for e in enrs if int(e["remaining_amount"] or 0)>0 and "cancel" not in e["enrollment_status"] and not e["enrollment_status"].startswith("pending")]
+_inst=[e for e in _debt if any("installment" in p["payment_method"] for p in pays if p["enrollment_id"]==e["enrollment_id"])]
+if _inst:      _inst[0]["next_payment_due"]=FD(TODAY)
+if len(_inst)>1:_inst[1]["next_payment_due"]=FD(TODAY-days(random.randint(1,2)))
+_others=[e for e in _debt if e not in _inst]
+random.shuffle(_others)
+# MỌI công nợ đều phải có HẸN THU. Muốn có hàng "nợ quá hạn" thì đặt hẹn thu ở QUÁ KHỨ,
+# KHÔNG bỏ trống - bỏ trống là app mất mốc nhắc, kế toán không biết hôm nay phải gọi ai.
+for _i,_e in enumerate(_others):
+    if _i>=len(_others)-4:                             # 4 hồ sơ cuối: hẹn thu ĐÃ QUÁ HẠN (đỏ có chủ đích)
+        _e["next_payment_due"]=FD(TODAY-days(random.choice([1,3,6,11])))
+    else:
+        _e["next_payment_due"]=FD(TODAY+days(random.choice([3,5,7,10,14,18])))
+# dọn ngày thu: không có khoản thu trong tương lai
+for p in pays:
+    t=dt.datetime.strptime(p["payment_time"],"%d/%m/%Y %H:%M")
+    if t>NOW: p["payment_time"]=F(NOW-days(random.randint(1,4)))
+# cân doanh thu: dồn bớt khoản thu 2 tháng trước sang tháng này (xu hướng ▲ nhẹ, tổng không đổi)
+def _m(p): return dt.datetime.strptime(p["payment_time"],"%d/%m/%Y %H:%M").month
+cur_m=TODAY.month; prev_m=(TODAY-days(30)).month
+def _tot(m): return sum(p["amount"] for p in pays if _m(p)==m)
+guard=0
+while _tot(cur_m)<int(_tot(prev_m)*1.05) and guard<300:
+    cands=[p for p in pays if _m(p) in (prev_m,(TODAY-days(60)).month)]
+    if not cands: break
+    p=random.choice(cands); p["payment_time"]=F(TODAY-days(random.randint(1,19))+dt.timedelta(hours=10))
+    guard+=1
+
+# ================= DL08 ONBOARDING =================
+obs=[]; ob_n=0
+def add_ob(s,cid,kind,off=None):
+    global ob_n; ob_n+=1
+    e=enr_of.get(s["student_id"],{})
+    # Mốc xếp lớp phải TRƯỚC ngày khai giảng của chính lớp đó. run_start chỉ có key cho lớp
+    # đang chạy nên lớp đã kết thúc rơi về -30 -> xếp lớp sau khai giảng cả trăm ngày.
+    _kg=run_start.get(cid)
+    if _kg is None: _kg=cls_off.get(cid,(-30,0))[0]
+    base=TODAY+days(off if off is not None else _kg+random.randint(-4,-1))
+    base=base+dt.timedelta(hours=10)
+    o={"onboarding_id":"OB-%03d"%ob_n,"enrollment_id":e.get("enrollment_id",""),"student_id":s["student_id"],
+       "placement_status":"confirmed (HV xác nhận đồng ý)","placement_note":"","assigned_by":random.choice(ACAD_IDS),"assigned_at":F(base),
+       "class_id":cid or "","class_confirmation_status":"","confirmation_time":"","onboarding_status":"not_started (Chưa bắt đầu)",
+       "onboarding_note":"","onboarding_completed_at":"","placement_change_count":"0","sla_status":"","class_info_sent_at":"",
+       "auto_trigger_hint":"","next_action":"","student_id_name":s["full_name"],"class_id_name":next((c["class_name"] for c in CLS if c["class_id"]==cid),"")}
+    if kind=="done":
+        o.update(class_confirmation_status="confirmed (Đồng ý)",class_info_sent_at=F(base+dt.timedelta(hours=3)),
+                 confirmation_time=F(base+dt.timedelta(hours=9)),onboarding_status="completed (Hoàn thành)",onboarding_completed_at=F(base+days(1)))
+    elif kind=="sent_wait": o.update(class_info_sent_at=F(NOW-dt.timedelta(hours=6)),class_confirmation_status="pending (Chờ phản hồi)",onboarding_status="in_progress (Đang thực hiện)",assigned_at=F(NOW-dt.timedelta(hours=8)))
+    elif kind=="need_send": o.update(assigned_at=F(NOW-dt.timedelta(hours=3)),onboarding_status="in_progress (Đang thực hiện)")
+    elif kind=="rejected": o.update(class_info_sent_at=F(NOW-days(1)),class_confirmation_status="rejected (Từ chối)",onboarding_status="in_progress (Đang thực hiện)",assigned_at=F(NOW-days(1)-dt.timedelta(hours=4)))
+    elif kind=="changed":
+        o.update(placement_status="changed (Đã đổi lớp ≥1 lần)",placement_change_count="1",
+                 placement_note=F(NOW-days(2))+": đổi LOP-PRE-06 → "+cid+" (HV xin đổi lịch tối)",
+                 class_info_sent_at=F(NOW-days(2)+dt.timedelta(hours=2)),class_confirmation_status="confirmed (Đồng ý)",
+                 confirmation_time=F(NOW-days(1)),onboarding_status="completed (Hoàn thành)",onboarding_completed_at=F(NOW-days(1)))
+    obs.append(o); return o
+for cid,r in rosters.items():
+    for sid in r:
+        s=SBY[sid]
+        add_ob(s,cid,"done")
+# fresh pipeline states: xếp vào lớp SẮP khai giảng (open) - xếp trước khai giảng, đúng SOP
+add_ob(fresh[0],"LOP-IELTS-6.0-15","need_send",off=0)
+add_ob(fresh[1],"LOP-IELTS-6.0-15","sent_wait",off=0)
+_ob_rej=add_ob(fresh[2],"LOP-IELTS-6.0-15","rejected",off=-1)
+_ob_rej["assigned_at"]=F(NOW-dt.timedelta(hours=14)); _ob_rej["class_info_sent_at"]=F(NOW-dt.timedelta(hours=10))
+# 2 HV mới nữa (có lớp nhưng CHƯA học buổi nào) - tạo cảnh báo QUÁ HẠN đỏ
+f_ov1=mk_student(take_name(),"active (Đang học)",-2,"CRS-PRE-01"); students.append(f_ov1); SBY[f_ov1["student_id"]]=f_ov1
+f_ov2=mk_student(take_name(),"active (Đang học)",-5,"CRS-PRE-01"); students.append(f_ov2); SBY[f_ov2["student_id"]]=f_ov2
+for s_ in (f_ov1,f_ov2):
+    L_=mk_lead(s_["full_name"],s_["phone_number"],"converted (Đã thành học viên)",-random.randint(12,20),random.choice(SALES))
+    leads.append(L_); lead_of[s_["student_id"]]=L_; LBY[L_["lead_id"]]=L_
+    e_=add_enr(L_,s_,"CRS-PRE-01",created=NOW-days(6)); add_pay(e_,NOW-days(6),int(e_["final_fee"]))
+    enr_of[s_["student_id"]]=e_; s_["first_enrollment_id"]=e_["enrollment_id"]; s_["first_enrollment_date"]=e_["enrollment_time"]
+# 2 ca vào GIỮA KHÓA lớp đang chạy (hợp lệ theo SOP - xếp bổ sung), 1 ca quá hạn gửi info (đỏ có chủ đích)
+ob_ov1=add_ob(f_ov1,"LOP-PRE-06","need_send"); ob_ov1["assigned_at"]=F(NOW-dt.timedelta(hours=30))
+ob_ov2=add_ob(f_ov2,"LOP-PRE-06","sent_wait"); ob_ov2["assigned_at"]=F(NOW-dt.timedelta(hours=20)); ob_ov2["class_info_sent_at"]=F(NOW-dt.timedelta(hours=15))
+# fresh[3]: CHƯA xếp lớp -> vẫn PHẢI có bản ghi DL08 ở trạng thái not_assigned. Hàng chờ
+# "Xếp lớp học viên" là DỮ LIỆU CÓ THẬT, không phải "sự vắng mặt của dòng dữ liệu" - dùng
+# chỗ trống làm tín hiệu thì không phân biệt được "đang chờ xếp" với "thủng dữ liệu".
+_ob_wait=add_ob(fresh[3],"","need_send",off=0)
+_ob_wait.update(placement_status="not_assigned (Chưa xếp lớp)",class_id="",class_id_name="",
+                class_info_sent_at="",onboarding_status="not_started (Chưa bắt đầu)",
+                next_action="Xếp lớp cho HV trong 3 ngày kể từ ngày đóng cọc.")
+# 4 ca ĐÃ ĐỔI LỚP ở các lớp khác nhau (ghi đè bản done của chính HV đó)
+for _cid,_ix in [("LOP-CRSIEL-18",0),("LOP-IELTS-6.0-12",2),("LOP-PRE-06",3),("LOP-IELTS-7.0-02",1)]:
+    _ch=add_ob(SBY[rosters[_cid][_ix]],_cid,"changed")
+    _dups=[o for o in obs if o["student_id"]==_ch["student_id"]]
+    for _dd in _dups[:-1]: obs.remove(_dd)
+# current_enrollment
+cnt={}
+for o in obs:
+    if o["class_id"]: cnt[o["class_id"]]=cnt.get(o["class_id"],0)+1
+for c in CLS: c["current_enrollment"]=cnt.get(c["class_id"],0)
+# sức chứa không được nhỏ hơn sĩ số thật (tránh fixdata dời HV demo sang lớp khác)
+for c in CLS:
+    try: _cap=int(str(c.get("class_capacity") or 0))
+    except Exception: _cap=0
+    # LỚP 1-1 KHÔNG ĐI QUA LUẬT NÀY. Sĩ số tối đa 1 CHÍNH LÀ định nghĩa lớp 1-1 (anh Luân chốt
+    # 06/08); nâng nó lên "sĩ số + 2" là xoá sổ toàn bộ mảng 1-1 mà không ai thấy - lớp vẫn còn
+    # đó, chỉ là không lớp nào còn được tính là 1-1 nữa.
+    if _cap==1: continue
+    if _cap<int(c["current_enrollment"] or 0)+2: c["class_capacity"]=int(c["current_enrollment"] or 0)+2
+
+# ĐIỂM KIỂM TRA GIỮA KHÓA (mid_*) - app đọc từ DL08 (midForm/midSave dùng mid_listening/
+# mid_reading/mid_writing/mid_speaking/mid_overall/mid_test_date). Điền cho HV các lớp đã
+# qua nửa chặng (~1/2 số HV đang học); HV chưa thi thì bỏ trống điểm.
+for o in obs:
+    for _mk in ("mid_listening","mid_reading","mid_writing","mid_speaking","mid_overall","mid_test_date"):
+        o.setdefault(_mk,"")
+_ob_by_stu={}
+for o in obs: _ob_by_stu.setdefault((o["student_id"],o["class_id"]),o)
+def _mid_date_of(c):
+    """Mốc thi giữa khóa = CHÍNH GIỮA khung ngày của lớp. Không neo theo run_start vì lớp
+    đã kết thúc không có run_start (đó là lý do 11 HV lớp đã kết thúc trống điểm giữa khóa)."""
+    _a=dt.datetime.strptime(c["class_start_date"],"%d/%m/%Y") if str(c.get("class_start_date") or "").strip() else None
+    _b=dt.datetime.strptime(c["class_end_date"],"%d/%m/%Y") if str(c.get("class_end_date") or "").strip() else None
+    if not (_a and _b): return None
+    _m=_a+(_b-_a)/2
+    return None if _m>NOW else _m
+# DUYỆT MỌI LỚP đã kết thúc + đang học ĐÃ QUA NỬA CHẶNG -> bắt buộc có điểm giữa khóa.
+# Lớp chưa qua nửa chặng tự nhiên còn trống - ĐÓ mới là "ô trống để demo nhập tay",
+# không cần bỏ ngẫu nhiên 12% nữa. HV bỏ học / đã hoàn thành cũng phải có điểm (rule
+# duyệt MỌI dòng DL08 của lớp, không riêng HV đang học).
+for _c in CLS:
+    _st=str(_c.get("class_status") or "")
+    if not (_st.startswith("finished") or _st.startswith("in_progress")): continue
+    cid=_c["class_id"]
+    _mid_d=_mid_date_of(_c)
+    if not _mid_d: continue
+    for sid in rosters.get(cid,[]):
+        o=_ob_by_stu.get((sid,cid))
+        if not o: continue
+        # 4 kỹ năng sinh TRƯỚC, overall SUY RA từ trung bình (làm tròn 0.5) - không gán độc lập
+        _base=round(random.uniform(4.0,6.5)*2)/2
+        _l =max(1,round((_base+random.uniform(-.5,.5))*2)/2)
+        _r =max(1,round((_base+random.uniform(-.5,.5))*2)/2)
+        _w =max(1,round((_base-0.5)*2)/2)
+        _sp=max(1,round((_base+random.uniform(-.5,.5))*2)/2)
+        o["mid_listening"]=str(_l); o["mid_reading"]=str(_r)
+        o["mid_writing"]=str(_w);   o["mid_speaking"]=str(_sp)
+        o["mid_overall"]=str(round((_l+_r+_w+_sp)/4*2)/2)
+        o["mid_test_date"]=FD(_mid_d)
+
+# ================= DL11 BUỔI HỌC =================
+sessions=[]; ses_n=0
+# SỔ LỊCH BẬN: một GV / một phòng chỉ đứng ĐÚNG MỘT lớp trong cùng khung giờ. Lớp đã được
+# xếp GV+phòng không đụng nhau ở khối trên, sổ này là chốt chặn cho buổi chèn tay (buổi bù,
+# buổi đang diễn ra) - thiếu nó là tái sinh lỗi "GV dạy 2 lớp cùng giờ".
+busy={}; busy_room={}
+def gen_sessions(cid, start_off, end_off, status_all=None, limit=40):
+    global ses_n
+    c=next(x for x in CLS if x["class_id"]==cid)
+    room=str(c.get("venue_or_zoom_link") or "").strip()
+    dows=sched_days(c["class_schedule"]); h,mi=sched_hour(c["class_schedule"]); dur=sched_dur(c["class_schedule"])
+    d=TODAY+days(start_off); num=0
+    while d<=TODAY+days(end_off) and num<limit:
+        if d.weekday() in dows:
+            num+=1; ses_n+=1
+            sd=d.replace(hour=h,minute=mi)
+            past=sd<NOW
+            late=random.random()<0.12
+            row={"session_id":"SES-%03d"%ses_n,"class_id":cid,"session_number":num,"session_date":F(sd),
+                 "class_start_scheduled":F(sd),"class_start_actual":F(sd+dt.timedelta(minutes=random.choice([5,8,12]) if late else 0)) if past else "",
+                 "class_end_actual":F(sd+dt.timedelta(hours=dur)) if past else "",
+                 "teacher_late_minutes":(random.choice([5,8,12]) if late else 0) if past else "",
+                 "teacher_id":c.get("main_teacher_id",""),"session_status":"completed (Đã hoàn thành)" if past else "scheduled (Đã lên lịch)",
+                 "has_teacher_note":"Có" if past and random.random()<0.7 else "","teacher_note_completed_at":"","teacher_note_within_sla":"",
+                 "teacher_note_summary":random.choice(["Unit theo giáo trình + luyện đề","Chữa bài Writing, giao homework","Speaking part 2 theo cặp"]) if past and random.random()<0.7 else "",
+                 "materials_link":"","notes":"","next_action":"","class_id_name":c["class_name"],"teacher_id_name":TEACH.get(c.get("main_teacher_id",""),"")}
+            sessions.append(row)
+            if row["teacher_id"]: busy[(row["teacher_id"],sd)]=row["session_id"]
+            if room: busy_room[(room,sd)]=row["session_id"]
+        d+=days(1)
+# lớp đang học LUÔN còn buổi trong TƯƠNG LAI, rải 1-3 tuần tới theo lịch tuần của lớp
+for cid in RUN: gen_sessions(cid, run_start[cid], 18)
+# Lớp ĐÃ KẾT THÚC phải có ĐỦ số buổi hợp đồng của khóa (luật 9i) - trước đây cắt ở 40 buổi.
+for cid,_eo in FIN_END.items():
+    _c=next(x for x in CLS if x["class_id"]==cid)
+    gen_sessions(cid, fin_start[cid], _eo, limit=ses_target(_c))
+    _mine=[x for x in sessions if x["class_id"]==cid]
+    if _mine: _c["class_end_date"]=FD(dt.datetime.strptime(_mine[-1]["session_date"],"%d/%m/%Y %H:%M"))
+# MỌI lớp còn lại (đang tuyển sinh / lên kế hoạch / đã hủy) cũng phải có lịch buổi, nếu không
+# trang lớp trắng trơn (luật 9j). Lớp chưa khai giảng chỉ công bố lịch 1 tháng đầu - đúng cách
+# trung tâm làm thật, và không thổi phồng dữ liệu demo.
+for c in CLS:
+    if c["class_id"] in RUN or c["class_id"] in FIN_END: continue
+    _a,_b=cls_off.get(c["class_id"],(None,None))
+    if _a is None: continue
+    gen_sessions(c["class_id"], _a, min(_a+30,_b))
+    if "cancelled" in str(c.get("class_status","")):
+        # lớp ĐÃ HỦY: lịch từng lên rồi hủy theo, giữ lại để còn truy vết chứ không xóa
+        for _s in sessions:
+            if _s["class_id"]==c["class_id"]:
+                _s.update(session_status="cancelled (Đã hủy)",class_start_actual="",class_end_actual="",
+                          teacher_late_minutes="",notes="Lớp đã hủy trước khai giảng - buổi không diễn ra")
+# ghi chú GV sau buổi + tài liệu; 2 buổi bị hủy; 1 buổi ĐANG DIỄN RA ngay lúc này
+for srow in sessions:
+    if srow["session_status"].startswith("completed"):
+        if srow["teacher_note_summary"]:
+            sd=dt.datetime.strptime(srow["session_date"],"%d/%m/%Y %H:%M")
+            late_note=random.random()<0.2
+            srow["has_teacher_note"]="Có"
+            srow["teacher_note_completed_at"]=F(sd+dt.timedelta(hours=random.randint(26,40) if late_note else random.randint(2,20)))
+            srow["teacher_note_within_sla"]="Trễ" if late_note else "Đúng hạn"
+        if random.random()<0.4: srow["materials_link"]="https://drive.google.com/itts/"+srow["session_id"]
+_pastss=[s for s in sessions if s["session_status"].startswith("completed")]
+for srow in random.sample(_pastss,2):
+    srow.update(session_status="cancelled (Đã hủy)",class_start_actual="",class_end_actual="",teacher_late_minutes="",
+        has_teacher_note="",teacher_note_completed_at="",teacher_note_within_sla="",teacher_note_summary="",notes="Nghỉ lễ / GV bận đột xuất - học bù tuần sau")
+_cancel_ids={s["session_id"] for s in sessions if s["session_status"].startswith("cancelled")}
+# buổi ĐANG DIỄN RA: lấy từ lớp KHÔNG có HV demo (giữ nguyên buổi sắp tới 1-3 ngày của lớp demo)
+_demo_cls={"LOP-IELTS-6.5-04","LOP-IELTS-7.0-02"}
+_live=next((s for s in sessions if s["session_status"].startswith("scheduled") and s["class_id"] not in _demo_cls),None)
+if _live:
+    # ═══ BUỔI "ĐANG DIỄN RA" PHẢI NẰM TRONG GIỜ MỞ CỬA, KỂ CẢ KHI CHẠY LÚC 2 GIỜ SÁNG ═══════
+    # Bẫy phụ thuộc ĐỒNG HỒ, cắn 13/08 lúc 02:41: khối này lấy thẳng `NOW - 40 phút`, nên chạy
+    # pipeline ban đêm là buổi học rơi vào 02:41 và `check_logic` luật 7k đỏ ("buổi xếp vào giờ
+    # trung tâm ĐÓNG CỬA"). Không phải lỗi mới - nó nằm đây từ đầu, chỉ chưa ai chạy vào giờ đó.
+    # Cùng họ với cái bẫy "đồng hồ vắt qua nửa đêm" đã ghi hôm 11/08: một khối dữ liệu neo vào
+    # giờ chạy thì nó đúng hay sai tuỳ lúc người ta bấm, mà không ai đọc mã ra được điều đó.
+    # Nay kẹp vào khung 6h-22h: chạy trong giờ thì y như cũ, chạy ngoài giờ thì lùi về buổi tối
+    # gần nhất - vẫn là một buổi "đang diễn ra" hợp lý để demo.
+    _liveAt = NOW - dt.timedelta(minutes=40)
+    if not (6 <= _liveAt.hour < 22):
+        _liveAt = (_liveAt.replace(hour=19, minute=30, second=0, microsecond=0)
+                   - (days(1) if _liveAt.hour < 6 else days(0)))
+    _live.update(session_date=F(_liveAt), class_start_scheduled=F(_liveAt),
+        class_start_actual=F(_liveAt + dt.timedelta(minutes=5)),
+        session_status="in_progress (Đang diễn ra)", teacher_late_minutes=5)
+
+# MỖI GIẢNG VIÊN có ít nhất 1 buổi HÔM NAY: GV nào trống lịch hôm nay thì thêm 1 buổi
+# HỌC BÙ hôm nay cho lớp GV đó chủ nhiệm (bù cho các buổi đã hủy "học bù tuần sau").
+_teach_today=set()
+for srow in sessions:
+    _sd=dt.datetime.strptime(srow["session_date"],"%d/%m/%Y %H:%M")
+    if _sd.date()==TODAY.date() and not srow["session_status"].startswith("cancelled"):
+        _teach_today.add(srow["teacher_id"])
+# V9.99m - BUỔI BÙ KHÔNG ĐƯỢC ĐẠP LÊN PHÒNG ĐANG CÓ LỚP. Buổi bù này chèn thêm ngoài lịch
+# tuần của lớp, nên nó KHÔNG đi qua bộ giữ chỗ phòng ở phần xếp lớp. Đo được 04/08: lớp IELTS
+# 6.5 (T2-T4-T6) được chèn buổi bù 19h30 hôm nay - trúng ngay khung 19h-20h30 của lớp IELTS 7.0
+# đang học cùng Phòng 202. Trên màn "Phòng & đụng lịch" hiện thành một ca đụng phòng mà không
+# ai tạo ra có chủ đích. Nay chọn giờ bù có tránh: giờ nào phòng ấy đang có lớp thì bỏ qua.
+_ban_phong={}          # phòng -> tập giờ hôm nay đã có lớp (mỗi buổi chiếm 2 giờ, buổi dài 90 phút)
+for srow in sessions:
+    _sd0=dt.datetime.strptime(srow["session_date"],"%d/%m/%Y %H:%M")
+    if _sd0.date()!=TODAY.date() or srow["session_status"].startswith("cancelled"): continue
+    _c0=next((x for x in CLS if x["class_id"]==srow["class_id"]),None)
+    _ph=str((_c0 or {}).get("venue_or_zoom_link") or "")
+    if not _ph or _ph.startswith("http") or "hủy" in _ph: continue   # lớp online không chiếm phòng
+    _ban_phong.setdefault(_ph,set()).update({_sd0.hour,_sd0.hour+1})
+_mk_hour=17 if NOW.hour<=17 else min(NOW.hour+1,21)
+for _tid in TEACH:
+    if _tid in _teach_today: continue
+    _cid=next((c["class_id"] for c in CLS if str(c.get("main_teacher_id"))== _tid and c["class_id"] in RUN),None)
+    if not _cid: continue
+    _c=next(x for x in CLS if x["class_id"]==_cid)
+    _ph=str(_c.get("venue_or_zoom_link") or "")
+    _phong_that=bool(_ph) and not _ph.startswith("http") and "hủy" not in _ph
+    if _phong_that:
+        _ban=_ban_phong.get(_ph,set())
+        while _mk_hour<=21 and ({_mk_hour,_mk_hour+1} & _ban): _mk_hour+=1
+        if _mk_hour>21: continue      # hôm nay phòng ấy kín - thà không có buổi bù còn hơn đụng phòng
+        _ban_phong.setdefault(_ph,set()).update({_mk_hour,_mk_hour+1})
+    _sd=TODAY+dt.timedelta(hours=_mk_hour,minutes=30)
+    ses_n+=1
+    sessions.append({"session_id":"SES-%03d"%ses_n,"class_id":_cid,"session_number":0,"session_date":F(_sd),
+        "class_start_scheduled":F(_sd),"class_start_actual":"","class_end_actual":"","teacher_late_minutes":"",
+        "teacher_id":_tid,"session_status":"scheduled (Đã lên lịch)","has_teacher_note":"","teacher_note_completed_at":"",
+        "teacher_note_within_sla":"","teacher_note_summary":"","materials_link":"",
+        "notes":"Buổi học bù cho buổi nghỉ trước đó - đã báo nhóm lớp","next_action":"",
+        "class_id_name":_c["class_name"],"teacher_id_name":TEACH.get(_tid,"")})
+    _mk_hour=min(_mk_hour+1,21)
+# đánh lại SỐ BUỔI theo dòng thời gian từng lớp (buổi bù chen giữa vẫn nối tiếp 1..n)
+_by_cls={}
+for srow in sessions: _by_cls.setdefault(srow["class_id"],[]).append(srow)
+for _cid,_ss in _by_cls.items():
+    _ss.sort(key=lambda x:dt.datetime.strptime(x["session_date"],"%d/%m/%Y %H:%M"))
+    for _i,_srow in enumerate(_ss): _srow["session_number"]=_i+1
+
+# ================= DL12 ĐIỂM DANH =================
+atts=[]; at_n=0
+sess_by_class={}
+for srow in sessions: sess_by_class.setdefault(srow["class_id"],[]).append(srow)
+def add_att(srow,sid,code,absence="",perf=None,note=""):
+    global at_n; at_n+=1
+    st=SBY[sid]
+    sd=dt.datetime.strptime(srow["session_date"],"%d/%m/%Y %H:%M")
+    row={"attendance_id":"AT-%04d"%at_n,"session_id":srow["session_id"],"student_id":sid,"student_name":st["full_name"],
+         "attendance_status":{"p":"on_time (Đúng giờ)","l":"late (Trễ)","a":"no_show (Vắng)"}[code],
+         "absence_type":absence,"check_in_time":F(sd+dt.timedelta(minutes=random.randint(-8,4) if code=="p" else random.randint(6,20))) if code!="a" else "",
+         "in_class_performance":perf or random.choice(["good (Tốt)","good (Tốt)","average (Bình thường)","average (Bình thường)","weak (Yếu)"]) if code!="a" else "",
+         "note":note,"next_action":""}
+    atts.append(row)
+absent_count={}; unexc_count={}
+for cid,r in rosters.items():
+    past=[x for x in sess_by_class.get(cid,[]) if x["session_status"].startswith("completed")]
+    use=past          # MỌI buổi đã dạy đều phải có điểm danh - trước đây chỉ 12 buổi gần nhất
+                      # nên buổi cũ trống trơn, KPI ADC tụt và nhật ký buổi học rỗng.
+    for srow in use:
+        for sid in r:
+            st=SBY[sid]
+            if st["student_status"].startswith("dropped") and srow["session_number"]>5:
+                continue
+            rr=random.random()
+            if rr<0.85: add_att(srow,sid,"p")
+            elif rr<0.91: add_att(srow,sid,"l")
+            else:
+                exc=random.random()<0.55
+                add_att(srow,sid,"a","excused (Có phép)" if exc else "unexcused (Không phép)",note="Xin nghỉ ốm" if exc and random.random()<0.5 else "")
+                absent_count[sid]=absent_count.get(sid,0)+1
+                if not exc: unexc_count[sid]=unexc_count.get(sid,0)+1
+
+# HÀNG CHỜ "gọi hỏi thăm HV vắng": giữ ĐÚNG 2 ca vắng không phép 0-2 ngày gần đây CHƯA ghi chú
+# (1 ca hôm qua - vàng, 1 ca 2 ngày trước - đỏ có chủ đích); các ca không phép cũ hơn trong cửa sổ
+# 4 ngày coi như đã gọi xong - ghi chú câu Việt tự nhiên để chuông không réo tràn.
+_sess_d={s["session_id"]:dt.datetime.strptime(s["session_date"],"%d/%m/%Y %H:%M") for s in sessions}
+_sess_done={s["session_id"] for s in sessions if s["session_status"].startswith("completed")}
+_unexc_recent=[a for a in atts if a["attendance_status"].startswith("no_show") and str(a["absence_type"]).startswith("unexcused")
+               and a["session_id"] in _sess_done and _sess_d[a["session_id"]]>=NOW-days(4)]
+_keep_quiet=[]
+for _tgt_day in (1,2):   # cần 1 ca vắng cách ~1 ngày (buổi tối hôm qua - vàng) và 1 ca cách ~2 ngày (đỏ)
+    _cands=[a for a in _unexc_recent if abs((NOW-_sess_d[a["session_id"]]).days)==_tgt_day and a not in _keep_quiet]
+    _cands.sort(key=lambda a:_sess_d[a["session_id"]],reverse=(_tgt_day==1))
+    _got=_cands[0] if _cands else None
+    if not _got:
+        _c1=[a for a in atts if a["attendance_status"].startswith("on_time") and a["session_id"] in _sess_done
+             and abs((NOW-_sess_d[a["session_id"]]).days)==_tgt_day]
+        _c1.sort(key=lambda a:_sess_d[a["session_id"]],reverse=(_tgt_day==1))
+        if _c1:
+            _got=_c1[0]
+            _got.update(attendance_status="no_show (Vắng)",absence_type="unexcused (Không phép)",check_in_time="",in_class_performance="",note="")
+            absent_count[_got["student_id"]]=absent_count.get(_got["student_id"],0)+1
+            unexc_count[_got["student_id"]]=unexc_count.get(_got["student_id"],0)+1
+            _unexc_recent.append(_got)
+    if _got: _keep_quiet.append(_got)
+for a in _unexc_recent:
+    if a in _keep_quiet or str(a.get("note") or "").strip(): continue
+    a["note"]="Đã gọi hỏi thăm "+FD(_sess_d[a["session_id"]]+days(1))+": HV báo bận việc nhà, hứa đi học lại buổi tới"
+
+# ================= DL13 BÀI TẬP =================
+hws=[]; hw_n=0
+TITLES={"Writing (Viết)":["Writing Task 2 - Opinion essay","Writing Task 1 - Line graph","Writing Task 2 - Discussion"],
+        "Listening (Nghe)":["Listening Section 3 - Cam 18","Listening dictation Unit 5"],
+        "Reading (Đọc)":["Reading passage - Matching headings","Reading TF/NG - Cam 17"],
+        "Speaking (Nói)":["Speaking Part 2 - Describe a person","Speaking Part 1 - Hobbies record"],
+        "Vocabulary (Từ vựng)":["Vocab Unit 4 - Education","Collocations - Environment"],
+        "Grammar (Ngữ pháp)":["Grammar - Conditionals worksheet"]}
+FB_BANK=["Bài tốt, chú ý spelling","Ý ổn nhưng thiếu ví dụ, band 5.5","Cần luyện thêm task response","Tiến bộ rõ so với bài trước","Ngữ pháp còn sai thì, xem lại mục 3"]
+miss_count={}
+def add_hw_assignment(cid, srow, kind):
+    global hw_n
+    skill=random.choice(list(TITLES.keys()))
+    title=random.choice(TITLES[skill])
+    c=next(x for x in CLS if x["class_id"]==cid)
+    ad=dt.datetime.strptime(srow["session_date"],"%d/%m/%Y %H:%M")
+    due=ad+days(3)
+    for sid in rosters[cid]:
+        st=SBY[sid]
+        if st["student_status"].startswith("dropped") and srow["session_number"]>5: continue
+        hw_n+=1
+        row={"homework_id":"HW-%04d"%hw_n,"session_id":srow["session_id"],"class_id":cid,"student_id":sid,"student_name":st["full_name"],
+             "homework_title":title,"skill":skill,"homework_assigned_time":F(ad),"homework_due_date":FD(due),
+             "homework_submitted_time":"","is_late":"","homework_status":"assigned (Đã giao)","homework_score":"","score_type":"band",
+             "graded_at":"","graded_within_48h":"","teacher_feedback":"","teacher_id":c.get("main_teacher_id",""),
+             "notes":"","next_action":"","class_id_name":c["class_name"],"teacher_id_name":TEACH.get(c.get("main_teacher_id",""),"")}
+        if kind=="graded":
+            r=random.random()
+            if r<0.78:
+                _late_pick=random.random()<0.18
+                _due_end=due.replace(hour=23,minute=59)
+                sub=(_due_end+dt.timedelta(hours=random.randint(3,30))) if _late_pick else (_due_end-dt.timedelta(hours=random.randint(4,40)))
+                if sub<ad+dt.timedelta(hours=2): sub=ad+dt.timedelta(hours=2)
+                lt=sub.date()>due.date()       # hạn nộp là ô NGÀY -> so theo ngày, không so theo giờ
+                row.update(homework_submitted_time=F(sub),is_late="Có" if lt else "Không",
+                    homework_status=("submitted_late (Nộp trễ)" if lt else "submitted_on_time (Nộp đúng/trước hạn)"))
+                g_in=random.random()<0.8
+                gat=sub+dt.timedelta(hours=random.randint(6,44) if g_in else random.randint(50,90))
+                row.update(homework_score=str(round(random.uniform(4.5,8.0)*2)/2),graded_at=F(min(gat,NOW-dt.timedelta(hours=1))),
+                    graded_within_48h="Có" if g_in else "Không",teacher_feedback=random.choice(FB_BANK))
+            else:
+                row.update(homework_status="missing (Không nộp)")
+                miss_count[sid]=miss_count.get(sid,0)+1
+        elif kind=="submitted":
+            # SINH GIỜ NỘP TRƯỚC -> SUY RA nhãn. Trước đây nhãn "Nộp trễ/đúng hạn" được tung
+            # xúc xắc ĐỘC LẬP với giờ nộp nên 23 bài mang nhãn ngược hẳn với mốc thời gian.
+            _due_end=due.replace(hour=23,minute=59)
+            if random.random()<0.25: sub=_due_end+dt.timedelta(hours=random.choice([3,9,16,26,34]))
+            else:                    sub=_due_end-dt.timedelta(hours=random.choice([6,14,22,30,40,52]))
+            if sub>NOW-dt.timedelta(hours=1): sub=NOW-dt.timedelta(hours=1)   # không nộp ở tương lai
+            if sub<ad+dt.timedelta(hours=2):  sub=ad+dt.timedelta(hours=2)    # không nộp trước giờ giao
+            lt=sub.date()>due.date()                                          # nhãn suy ra SAU khi đã kẹp
+            row.update(homework_submitted_time=F(sub),is_late="Có" if lt else "Không",
+                homework_status=("submitted_late (Nộp trễ)" if lt else "submitted_on_time (Nộp đúng/trước hạn)"))
+        # kind=="assigned": để nguyên (chưa thu)
+        hws.append(row)
+for cid in RUN+FIN:
+    past=[x for x in sess_by_class.get(cid,[]) if x["session_status"].startswith("completed")]
+    picks=past[-8::2]
+    for srow in picks[:-1]:
+        add_hw_assignment(cid,srow,"graded")
+    if cid in FIN:
+        if past: add_hw_assignment(cid,past[-1],"graded")
+        continue
+    if len(past)>=2:
+        add_hw_assignment(cid,past[-2],"submitted")
+    if past:
+        add_hw_assignment(cid,past[-1],"assigned")
+
+# cờ nguy cơ theo dữ liệu thật
+_first_drop=True
+for s in students:
+    sid=s["student_id"]
+    ab=absent_count.get(sid,0); ux=unexc_count.get(sid,0); ms=miss_count.get(sid,0)
+    if s["student_status"].startswith("dropped"):
+        # chỉ ca bỏ học MỚI NHẤT còn treo cờ nguy cơ (đang xử lý giữ chân); các ca cũ đã chốt hồ sơ
+        if _first_drop:
+            s["attendance_progress_status"]="off_track (Sa sút nặng)"; s["attendance_risk_reason"]="frequent_absence (Vắng nhiều)"
+            s["academic_progress_status"]="off_track (Lệch tiến độ)"; s["academic_risk_reason"]="homework_missing (Không làm bài)"
+            _first_drop=False
+        else:
+            s["learning_followup_note"]=F(NOW-days(random.randint(6,15)))+": đã gọi giữ chân 2 lần không thành, chốt bỏ học và đóng hồ sơ"
+        continue
+    if ab>=3 or ux>=2:
+        s["attendance_progress_status"]="at_risk (Có nguy cơ)"; s["attendance_risk_reason"]="frequent_absence (Vắng nhiều)"
+        s["next_action"]="Gọi hỏi thăm + nhắc lịch học (NA064)."
+    if ms>=2:
+        s["academic_progress_status"]="at_risk (Có nguy cơ)"; s["academic_risk_reason"]="homework_missing (Không làm bài)"
+        s["next_action"]=(s["next_action"]+" " if s["next_action"] else "")+"Nhắc nộp bài + hẹn WOW củng cố (NA065)."
+# GIỮ TỐI ĐA 6 HV ở diện at_risk (mỗi HV nguy cơ = 1 việc đỏ trên chuông; số còn lại
+# coi như đã can thiệp xong - fixdata sẽ hạ tiếp một phần có ghi chú can thiệp)
+_risk_act=[s for s in students if "at_risk" in s["attendance_progress_status"]+s["academic_progress_status"]]
+for s in _risk_act[6:]:
+    s["attendance_progress_status"]="on_track (Đang đều đặn)"; s["attendance_risk_reason"]=""
+    s["academic_progress_status"]="on_track (Đang tiến bộ)"; s["academic_risk_reason"]=""
+    s["next_action"]=""
+    s["learning_followup_note"]=F(NOW-days(random.randint(2,8)))+": đã gọi nhắc học + xếp 1 buổi WOW củng cố, HV đi học lại đều"
+my_att={}
+for a in atts: my_att.setdefault(a["student_id"],[]).append(a["check_in_time"] or "")
+for s in students:
+    ts=[t for t in my_att.get(s["student_id"],[]) if t]
+    if ts: s["last_learning_activity_time"]=max(ts,key=lambda x:dt.datetime.strptime(x,"%d/%m/%Y %H:%M"))
+
+# ================= DL14 WOW =================
+# KHUNG GIO SINH TU BA CA, O 30 PHUT - bam dung man OLMS team dung that (anh Luan gui anh 11/08).
+# Truoc do lay 13 khung MOT GIO tu sheet `DL19` cua SOP. SOP la ban phac tren Excel; OLMS la thu
+# ho mo ra moi ngay - lay cai dang chay lam chuan.
+# KHAI O DAY chu khong o phan DL26 ben duoi, vi buoi WOW phai roi DUNG khung ngay tu luc sinh:
+# mot buoi nam ngoai luoi thi `fixdata` luat 18 se mo cho no mot ca ngoai luoi, ma ca ngoai luoi
+# thi BANG TONG dem duoc con LUOI khong ve ra - hai cho tren cung mot man noi hai chuyen.
+CA_TRUC=[("Ca sáng","09:00","12:30"),("Ca chiều","12:30","17:30"),("Ca tối","17:30","21:30")]
+O_PHUT=30
+def _khungTu(ca,buoc):
+    ra=[]
+    for _t,_tu,_den in ca:
+        h1,m1=[int(x) for x in _tu.split(":")]; h2,m2=[int(x) for x in _den.split(":")]
+        m=h1*60+m1; het=h2*60+m2
+        while m+buoc<=het:
+            ra.append((m//60,m%60)); m+=buoc
+    seen=set(); out=[]
+    for x in ra:
+        if x not in seen: seen.add(x); out.append(x)
+    return out
+KHUNG_TRUC=_khungTu(CA_TRUC,O_PHUT)
+def _napKhung(d):
+    """Keo mot moc buoi WOW ve dung khung gio gan nhat, GIU NGUYEN ben qua khu / tuong lai.
+
+    Giu nguyen ben la phan quan trong: keo mot buoi 'da hoan thanh' sang 20:30 hom nay la day no
+    sang TUONG LAI - `check_logic.py` luat 7g bat ngay. Da can dung lan dau khi snap mu."""
+    ung=[d.replace(hour=h,minute=m,second=0,microsecond=0) for h,m in KHUNG_TRUC]
+    qua=(d<=NOW)
+    hop=[c for c in ung if (c<=NOW)==qua] or ung
+    return min(hop,key=lambda c: abs((c-d).total_seconds()))
+wows=[]; wow_n=0
+def add_wow(s,kind,off=None):
+    global wow_n; wow_n+=1
+    gv=random.choice(WOWS)
+    skill=random.choice(["Speaking (Nói)","Writing (Viết)","Listening (Nghe)","Reading (Đọc)"])
+    row={"wow_id":"WOW-%03d"%wow_n,"booking_date":"","student_id":s["student_id"],"student_name":s["full_name"],
+         "wow_session_date":"","wow_session_type":random.choice(["academic_support (Hỗ trợ học thuật)","advanced_practice (Luyện nâng cao)","self_booked (HV tự đặt)"]),
+         "wow_booked_by":random.choice(["academic_hv (Học vụ)","student (Học viên)","teacher (Giảng viên)"]),
+         "wow_skill":skill,"wow_content_focus":random.choice(["Task 2 - opinion essay","Part 2 cue card","Chữa lỗi phát âm ending sounds","Chiến thuật matching headings"]),
+         "staff_id":gv[0],"staff_name":gv[1],"wow_status":"booked (Đã đặt)","wow_content_note":"","wow_outcome":"","wow_no_show_reason":"",
+         "quota_deducted":"no","sla_content_note_24h":"","notes":"","next_action":""}
+    if kind=="done":
+        d=gioHoc(NOW-days(random.randint(2,40)))
+        row.update(booking_date=F(d-days(2)),wow_session_date=F(d),wow_status="completed (Đã hoàn thành)",quota_deducted="yes",
+            wow_content_note="Luyện "+skill.split(" ")[0]+", HV nắm được phương pháp",wow_outcome=random.choice(["improved (Tiến bộ rõ rệt)","improved (Tiến bộ rõ rệt)","needs_more (Cần thêm buổi)"]),
+            sla_content_note_24h="Đúng hạn")
+    elif kind=="done_nonote":
+        # Hai buoi nay co MOT VIEC: mot buoi con trong han ghi chu 24h (vang), mot buoi da qua
+        # han (do). Truoc day dung NOW - 10/30 gio, nen no thua huong phut cua dong ho luc chay
+        # pipeline va roi ra nhung gio vo ly (01:49 sang).
+        # LAN VA DAU TIEN CUA CHINH EM CUNG SAI: snap mu sang khung 9/15/19 co the day buoi
+        # "da hoan thanh" sang 19h HOM NAY - tuc TUONG LAI. `check_logic.py` bat ngay (luat 7g).
+        # Nay dat MOC TUONG MINH, va moc nao cung o qua khu theo dung ve cua no.
+        if wow_n%2:
+            d=(NOW-days(1)).replace(hour=19,minute=0)          # toi qua - con trong 24h
+            if (NOW-d).total_seconds()/3600 >= 24:
+                d=NOW.replace(hour=9,minute=0)                 # da qua 19h roi thi lay sang nay
+        else:
+            d=(NOW-days(2)).replace(hour=19,minute=0)          # hai hom truoc - da qua han   # 1 còn trong hạn ghi 24h (vàng) + 1 quá hạn (đỏ)
+        row.update(booking_date=F(d-days(2)),wow_session_date=F(d),wow_status="completed (Đã hoàn thành)",quota_deducted="yes")
+    elif kind=="upcoming":
+        d=TODAY+days(off if off is not None else random.randint(1,6)); d=d.replace(hour=random.choice([9,15,19]))
+        row.update(booking_date=F(NOW-days(1)),wow_session_date=F(d),wow_status=random.choice(["booked (Đã đặt)","confirmed (Đã xác nhận)"]))
+    elif kind=="noshow":
+        d=gioHoc(NOW-days(random.randint(3,15)))
+        row.update(booking_date=F(d-days(2)),wow_session_date=F(d),wow_status="no_show (HV không đến)",quota_deducted="yes",
+            wow_no_show_reason=random.choice(["forgot (Quên lịch)","personal (Lý do cá nhân)","no_contact (Không liên lạc được)"]))
+    elif kind=="cancelled":
+        d=gioHoc(NOW-days(random.randint(3,20)))
+        row.update(booking_date=F(d-days(3)),wow_session_date=F(d),wow_status="cancelled (Đã hủy)",quota_deducted="no")
+    if row["wow_session_date"]:
+        row["wow_session_date"]=F(_napKhung(dt.datetime.strptime(row["wow_session_date"],"%d/%m/%Y %H:%M")))
+    wows.append(row); return row
+def _napWowRow(w):
+    """Dung khi mot cho khac gan de wow_session_date sau khi add_wow() da chay."""
+    if w.get("wow_session_date"):
+        w["wow_session_date"]=F(_napKhung(dt.datetime.strptime(w["wow_session_date"],"%d/%m/%Y %H:%M")))
+    return w
+active=[s for s in students if s["student_status"].startswith("active")]
+for _ in range(38): add_wow(random.choice(active),"done")
+for _ in range(2): add_wow(random.choice(active),"done_nonote")
+# V9.59: 9 buổi rải đúng 6 ngày tới - sang ngày thứ 7 là lịch WOW trống trơn ở mọi cổng
+# (coach, học viên, phụ huynh). Nay 26 buổi rải đều 18 ngày.
+for i in range(26): add_wow(random.choice(active),"upcoming",off=(i%18)+1)
+# 2 buổi WOW ngay HÔM NAY chưa dạy (1 đã đặt + 1 đã xác nhận, xếp giờ chiều tối)
+_w_td1=add_wow(random.choice(active),"upcoming",off=0); _w_td1["wow_session_date"]=F(TODAY+dt.timedelta(hours=17)); _w_td1["wow_status"]="booked (Đã đặt)"; _napWowRow(_w_td1)
+_w_td2=add_wow(random.choice(active),"upcoming",off=0); _w_td2["wow_session_date"]=F(TODAY+dt.timedelta(hours=19)); _w_td2["wow_status"]="confirmed (Đã xác nhận)"; _napWowRow(_w_td2)
+for _ in range(5): add_wow(random.choice(active),"noshow")
+for _ in range(3): add_wow(random.choice(active),"cancelled")
+# 1 buổi ghi nội dung TRỄ hạn 24h (đã ghi nhưng muộn)
+w_late=add_wow(random.choice(active),"done"); w_late["sla_content_note_24h"]="Trễ hạn"; w_late["wow_outcome"]="no_change (Chưa cải thiện)"
+# đa dạng người đặt
+for w in random.sample(wows,8): w["wow_booked_by"]=random.choice(["sales (NV Tư vấn)","system (Hệ thống tự tạo)"])
+# 1 HV DÙNG HẾT quota (demo chặn đặt thêm)
+s_ex=random.choice(active)
+used0=sum(1 for w in wows if w["student_id"]==s_ex["student_id"] and w["quota_deducted"]=="yes")
+for _ in range(max(0,int(s_ex["wow_quota_default"])-used0)):
+    w=add_wow(s_ex,"done")
+used={}
+for w in wows:
+    if w["quota_deducted"]=="yes": used[w["student_id"]]=used.get(w["student_id"],0)+1
+# 1 HV được duyệt thêm + 1 HV mua thêm quota
+extra1=random.choice([s for s in active if s is not s_ex]); extra1["wow_extra_approved"]="2"
+extra2=random.choice([s for s in active if s not in (s_ex,extra1)]); extra2["wow_extra_purchased"]="3"
+for s in students:
+    u=used.get(s["student_id"],0)
+    q=int(s["wow_quota_default"])+int(s["wow_extra_approved"] or 0)+int(s["wow_extra_purchased"] or 0)
+    s["wow_quota_used"]=str(u); s["wow_quota_remaining"]=str(max(0,q-u))
+
+# ================= DL15 KHẢO SÁT =================
+surveys=[]; sv_n=0
+def add_survey(s,cid,stype,kind):
+    global sv_n; sv_n+=1
+    c=next((x for x in CLS if x["class_id"]==cid),{})
+    sent=NOW-days({"week_1":30,"week_4":10}.get(stype.split(" ")[0],5))-days(random.randint(0,4))
+    row={"survey_id":"SUR-%03d"%sv_n,"student_id":s["student_id"],"student_name":s["full_name"],"class_id":cid,
+         "survey_type":stype,"sent_date":F(sent),"submitted_date":"","within_3_days":"","satisfaction_score":"","nps_score":"",
+         "progress_perception":"","positive_comments":"","negative_comments":"","suggestions":"","follow_up_needed":"",
+         "assigned_staff":random.choice([a[1] for a in ACAD]),"notes":"","next_action":"","class_id_name":c.get("class_name","")}
+    if kind=="answered":
+        sub=sent+days(random.randint(1,5))
+        sat=random.choice([4,4,5,5,3])
+        row.update(submitted_date=F(sub),within_3_days="Có" if (sub-sent).days<=3 else "Không",
+            satisfaction_score=sat,nps_score=random.choice([7,8,9,10]),progress_perception=random.choice(["Tiến bộ rõ","Ổn định"]),
+            positive_comments=random.choice(["GV nhiệt tình","Lộ trình rõ ràng","Lớp vui, sửa bài kỹ"]))
+    elif kind=="low":
+        sub=sent+days(random.randint(1,4))
+        row.update(submitted_date=F(sub),within_3_days="Có" if (sub-sent).days<=3 else "Không",
+            satisfaction_score=random.choice([1,2]),nps_score=random.choice([3,4,5]),
+            negative_comments=random.choice(["GV nói hơi nhanh","Lớp đông, ít được sửa bài","Giáo trình khó theo kịp"]),follow_up_needed="Có")
+    elif kind=="low_handled":
+        sub=sent+days(2)
+        row.update(submitted_date=F(sub),within_3_days="Có",satisfaction_score=2,nps_score=4,
+            negative_comments="Phòng học hơi ồn",follow_up_needed="",notes=F(sent+days(3))+": đã follow-up bởi "+random.choice([a[1] for a in ACAD]))
+    elif kind=="answered_fresh":
+        # PHIEU VUA NOP TRONG 48 GIO, DIEM TOT -> tinh huong NA037 cua so trigger HD3.
+        # BAY DA CAN 09/08: truoc day KHONG co phieu nao duoc thiet ke cho tinh huong nay - no
+        # duoc phu HOAN TOAN DO MAY, nho mot nhanh `sent` roi vao khoang 5-9 ngay truoc cong
+        # them 1-5 ngay nen thinh thoang cham dung hom nay. Doi du lieu mot chut la chuoi ngau
+        # nhien lech, khong con phieu nao roi vao, va `check_sop.py` do ngay (LUAT CUNG SO 0).
+        # Mot tinh huong SOP duoc phu do may thi som muon cung mat - phai co ban ghi DAT RIENG.
+        sub=NOW-dt.timedelta(hours=random.choice([6,18,30]))
+        row.update(sent_date=F(sub-days(2)), submitted_date=F(sub), within_3_days="Có",
+            satisfaction_score=random.choice([4,5]), nps_score=random.choice([9,10]),
+            progress_perception="Tiến bộ rõ",
+            positive_comments="Cô chữa bài kỹ, có ví dụ dễ hiểu")
+    elif kind=="waiting":
+        row.update(sent_date=F(NOW-days(random.randint(0,2))))
+    surveys.append(row)
+for cid in ["LOP-IELTS-6.5-04","LOP-IELTS-6.0-12","LOP-IELTS-7.0-02"]:
+    for sid in rosters[cid][:8]:
+        add_survey(SBY[sid],cid,"week_1 (Tuần 1)","answered")
+for cid in ["LOP-IELTS-6.5-04","LOP-IELTS-6.0-12"]:
+    for sid in rosters[cid][:4]:
+        add_survey(SBY[sid],cid,"week_4 (Tuần 4)","answered")
+for i in range(3): add_survey(SBY[rosters[RUN[i]][8 if len(rosters[RUN[i]])>8 else -1]],RUN[i],"week_4 (Tuần 4)","low")
+# Ba phieu VUA NOP trong 48 gio, diem tot - tinh huong NA037. Ba cai chu khong mot: mot ban ghi
+# duy nhat thi chi can mot lan doi du lieu la lai mat, va lan sau cung khong ai biet vi sao.
+for i in range(3):
+    add_survey(SBY[rosters[RUN[i]][0]], RUN[i], "week_1 (Tuần 1)", "answered_fresh")
+for i in range(2): add_survey(SBY[rosters[RUN[i]][-2]],RUN[i],"week_1 (Tuần 1)","low_handled")
+for i in range(5): add_survey(SBY[rosters[RUN[i%len(RUN)]][-1]],RUN[i%len(RUN)],"week_8 (Tuần 8)","waiting")
+for cid in ["LOP-IELTS-6.5-04"]:
+    for sid in rosters[cid][:4]: add_survey(SBY[sid],cid,"week_8 (Tuần 8)","answered")
+for sid in rosters["LOP-IELTS-6.5-03"][:6]:
+    add_survey(SBY[sid],"LOP-IELTS-6.5-03","end_of_course (Cuối khóa)","answered")
+for v in surveys:
+    if v["submitted_date"] and not v["progress_perception"]:
+        v["progress_perception"]=random.choice(["Tiến bộ rõ","Ổn định","Chậm hơn kỳ vọng"])
+
+# ================= DL16 + DL17 =================
+fbs=[]; fb_n=0
+kns=[]; kn_n=0
+def add_kn(s,cid,kind,content,ctype="teacher (Về 1 GV cụ thể)",sev="medium (Trung bình)",fb_id=""):
+    global kn_n; kn_n+=1
+    c=next((x for x in CLS if x["class_id"]==cid),{})
+    when={"new_fresh":NOW-dt.timedelta(hours=2),"new_over":NOW-dt.timedelta(hours=30),"assigned":NOW-days(1),
+          "inprog":NOW-dt.timedelta(hours=20),"resolved":NOW-days(random.randint(6,20)),"escalated":NOW-days(2)}[kind]
+    row={"complaint_id":"KN-2026-%03d"%kn_n,"student_id":s["student_id"],"class_id":cid,"feedback_id":fb_id,
+        "complaint_channel":random.choice(["call (Điện thoại)","message (Zalo/Facebook)","direct (Gặp mặt trực tiếp)"]),
+        "complaint_time":F(when),"complaint_type":ctype,"complaint_severity":sev,"complaint_content":content,
+        "complaint_status":"new (Mới tiếp nhận)","assigned_handler":"","assigned_at":"","resolution_note":"","resolution_time":"",
+        "complaint_result":"","student_feedback_after":"","escalated_to":"","sla_status":"","notes":"","next_action":"",
+        "student_id_name":s["full_name"],"class_id_name":c.get("class_name","")}
+    h=random.choice([a[1] for a in ACAD]+["Phạm Thị Mỹ Tiên"])
+    if kind=="assigned": row.update(complaint_status="assigned (Đã phân công)",assigned_handler=h,assigned_at=F(when+dt.timedelta(hours=3)))
+    elif kind=="inprog": row.update(complaint_status="in_progress (Đang xử lý)",assigned_handler=h,assigned_at=F(when+dt.timedelta(hours=2)))
+    elif kind=="resolved": row.update(complaint_status="resolved (Đã xử lý xong)",assigned_handler=h,assigned_at=F(when+dt.timedelta(hours=2)),
+        resolution_note=random.choice(["Đã trao đổi với GV điều chỉnh tốc độ dạy, HV đồng thuận","Sắp xếp học bù 2 buổi + đổi khung giờ","Đã hoàn phí chênh lệch và xin lỗi HV"]),
+        resolution_time=F(when+days(2)),complaint_result="accepted (Chấp nhận)")
+    elif kind=="escalated": row.update(complaint_status="escalated (Leo thang lên QL cao)",assigned_handler=h,assigned_at=F(when+dt.timedelta(hours=2)),escalated_to="Quản lý cấp cao")
+    kns.append(row); return row
+def add_fb(s,cid,ftype,kind,content,score=None,cat=None):
+    global fb_n; fb_n+=1
+    c=next((x for x in CLS if x["class_id"]==cid),{})
+    when=NOW-days(random.randint(1,25))
+    row={"feedback_id":"FB-2026-%03d"%fb_n,"feedback_time":F(when),"student_id":s["student_id"],"class_id":cid,
+        "feedback_channel":random.choice(["survey (Khảo sát có cấu trúc)","message (Tin nhắn)","direct (Trực tiếp)","call (Điện thoại)"]),
+        "feedback_type":ftype,"feedback_category":cat or random.choice(FBCATS),
+        "feedback_score":score if score is not None else random.choice([4,5]),"feedback_content":content,
+        "feedback_status":"new (Mới nhận)","classified_at":"","classified_by":"","feedback_action_note":"","action_taken_at":"",
+        "related_complaint_id":"","is_testimonial":"","notes":"","next_action":"","student_id_name":s["full_name"],"class_id_name":c.get("class_name","")}
+    if kind=="resolved": row.update(feedback_status="resolved (Đã xử lý xong)",classified_at=F(when+dt.timedelta(hours=4)),classified_by=random.choice([a[1] for a in ACAD]),feedback_action_note="Đã ghi nhận và phản hồi HV",action_taken_at=F(when+days(1)))
+    elif kind=="inprog": row.update(feedback_status="in_progress (Đang xử lý)",classified_at=F(when+dt.timedelta(hours=4)),classified_by=random.choice([a[1] for a in ACAD]))
+    fbs.append(row); return row
+POS=["GV dạy dễ hiểu, chữa bài kỹ","Lớp học vui, tiến bộ thấy rõ","Trợ giảng hỗ trợ nhiệt tình","Đăng ký thi thử được hỗ trợ nhanh"]
+FBCATS=["teacher_quality (Chất lượng giảng dạy)","curriculum (Chương trình/giáo trình)","schedule (Lịch học)","service (Thái độ phục vụ)","facility (Cơ sở vật chất)"]
+NEU=["Muốn thêm buổi luyện Speaking","Xin thêm tài liệu về collocations","Đề xuất mở lớp cuối tuần"]
+NEG=["GV nói nhanh, bạn mới theo không kịp","Điều hòa phòng B hỏng 2 buổi liền","Lịch học đổi đột ngột không báo trước","Bài chấm trả chậm hơn hẹn","Lớp đông hơn cam kết ban đầu"]
+for i in range(9):
+    r=add_fb(random.choice(active),random.choice(RUN),"positive (Tích cực)","resolved" if i<5 else "new",random.choice(POS))
+    if i<3: r["is_testimonial"]="Có"
+for i in range(7): add_fb(random.choice(active),random.choice(RUN),"neutral (Trung tính)","inprog" if i<3 else "new",random.choice(NEU),score=3)
+# NA092 "Phan hoi moi con trong han" (SOP HD3): phai co it nhat MOT phan hoi vua gui trong vai
+# gio, chua phan loai. add_fb luon lui ngau nhien 1-25 ngay nen tinh huong nay chi thinh thoang
+# ra dung - check_sop bat duoc 04/08 khi bat ngau nhien khong ra so 1. Nay gieo co chu dich.
+_fb_moi=add_fb(random.choice(active),random.choice(RUN),"neutral (Trung tính)","new",
+               "Xin thêm đề luyện Reading để làm ở nhà",score=4)
+_fb_moi["feedback_time"]=F(NOW-dt.timedelta(hours=3))
+negs=[]
+for i in range(10):
+    kind="new" if i<3 else ("inprog" if i<6 else "resolved")
+    negs.append(add_fb(random.choice(active),random.choice(RUN),"negative (Tiêu cực)",kind,NEG[i%len(NEG)],score=random.choice([1,2])))
+# khiếu nại (10) + 2 link từ feedback
+s_pool=active
+add_kn(random.choice(s_pool),RUN[0],"new_fresh","HV phản ánh GV vào trễ 15 phút hai buổi liên tiếp",sev="medium (Trung bình)")
+add_kn(random.choice(s_pool),RUN[1],"new_over","Xin chuyển lịch nhưng chưa được phản hồi", ctype="schedule (Lịch học)",sev="low (Thấp)")
+add_kn(random.choice(s_pool),RUN[2],"assigned","Phòng học ồn, ảnh hưởng nghe giảng",ctype="other (Khác)")
+k_fb1=add_kn(SBY[negs[3]["student_id"]],negs[3]["class_id"],"assigned",negs[3]["feedback_content"],ctype="teacher (Về 1 GV cụ thể)",sev="medium (Trung bình)",fb_id=negs[3]["feedback_id"])
+negs[3]["related_complaint_id"]=k_fb1["complaint_id"]; negs[3]["feedback_action_note"]="Chuyển thành khiếu nại "+k_fb1["complaint_id"]
+add_kn(random.choice(s_pool),RUN[3],"inprog","Học phí đã đóng nhưng chưa nhận biên nhận",ctype="payment (Thanh toán/học phí)")
+k_fb2=add_kn(SBY[negs[4]["student_id"]],negs[4]["class_id"],"inprog",negs[4]["feedback_content"],ctype="schedule (Lịch học)",sev="medium (Trung bình)",fb_id=negs[4]["feedback_id"])
+negs[4]["related_complaint_id"]=k_fb2["complaint_id"]; negs[4]["feedback_action_note"]="Chuyển thành khiếu nại "+k_fb2["complaint_id"]
+for i in range(3): add_kn(random.choice(s_pool),RUN[(i+2)%len(RUN)],"resolved",random.choice(NEG))
+add_kn(random.choice(s_pool),RUN[4],"escalated","Yêu cầu hoàn phí vì đổi GV giữa khóa",ctype="teacher (Về 1 GV cụ thể)",sev="high (Cao)")
+# thêm 4 ca phủ nốt: kết quả KHÔNG chấp nhận, chờ HV phản hồi, kênh email, quá hạn high đang xử lý
+k_rej=add_kn(random.choice(s_pool),RUN[0],"resolved","Đòi giảm học phí vì nghỉ 2 buổi có phép",ctype="payment (Thanh toán/học phí)")
+k_rej.update(complaint_result="rejected (Không chấp nhận)",resolution_note="Theo chính sách, nghỉ có phép được học bù, không giảm phí. Đã giải thích.",student_feedback_after="HV chưa hài lòng nhưng chấp nhận học bù")
+k_pd=add_kn(random.choice(s_pool),RUN[1],"resolved","Xin đổi ca học sang tối muộn",ctype="schedule (Lịch học)")
+k_pd.update(complaint_result="pending (Chờ phản hồi HV)",resolution_note="Đã đề xuất 2 khung giờ mới, chờ HV chọn",student_feedback_after="")
+k_em=add_kn(random.choice(s_pool),RUN[2],"assigned","Email phản ánh app học online lỗi đăng nhập",ctype="other (Khác)")
+k_em["complaint_channel"]="email (Email)"
+# khiếu nại MỨC CAO đang mở, mới 1-2 ngày (đỏ có chủ đích - demo SLA khiếu nại)
+k_hi=add_kn(random.choice(s_pool),RUN[3],"inprog","Sĩ số lớp vượt cam kết, khó tương tác",ctype="service (Thái độ phục vụ)",sev="high (Cao)")
+k_hi["complaint_time"]=F(NOW-days(1)-dt.timedelta(hours=8))
+# đóng bớt hồ sơ cũ cho dứt điểm: ca "xin chuyển lịch" để lâu -> đã xử lý xong
+for _kx in kns:
+    if _kx["complaint_content"].startswith("Xin chuyển lịch"):
+        _w0=dt.datetime.strptime(_kx["complaint_time"],"%d/%m/%Y %H:%M")
+        _kx.update(complaint_status="resolved (Đã xử lý xong)",assigned_handler=random.choice([a[1] for a in ACAD]),
+            assigned_at=F(_w0+dt.timedelta(hours=2)),resolution_note="Đã đổi HV sang khung giờ tối T3-5, HV xác nhận học được",
+            resolution_time=F(_w0+dt.timedelta(hours=20)),complaint_result="accepted (Chấp nhận)",student_feedback_after="HV hài lòng với lịch mới")
+
+# ================= DL18 KẾT THÚC =================
+ces=[]; ce_n=0
+def add_ce(s,cid,kind,re_state,idx=0):
+    global ce_n; ce_n+=1
+    c=next((x for x in CLS if x["class_id"]==cid),{})
+    e=enr_of.get(s["student_id"],{})
+    L=lead_of.get(s["student_id"],{})
+    endd=dt.datetime.strptime(c.get("class_end_date") or FD(NOW-days(20)),"%d/%m/%Y")
+    target=float(L.get("target_band","6.0") or 6.0)
+    fin=round(random.uniform(target-1.0,target+0.5)*2)/2
+    ach="achieved (Đạt mục tiêu)" if fin>=target else ("partially_achieved (Tiến bộ rõ nhưng chưa đủ)" if fin>=target-0.5 else "not_achieved (Không cải thiện đáng kể)")
+    row={"course_end_id":"CE-%03d"%ce_n,"student_id":s["student_id"],"enrollment_id":e.get("enrollment_id",""),"class_id":cid,
+        "course_completion_time":F(endd+dt.timedelta(hours=18)),"student_status":"completed (Hoàn thành khóa)" if kind=="fin" else "dropped (Bỏ học giữa chừng)",
+        "attendance_rate":str(random.randint(78,98))+"%","completion_rate":str(random.randint(80,100))+"%",
+        "final_test_score":str(fin) if kind=="fin" else "","final_listening":str(fin) if kind=="fin" else "","final_reading":str(fin) if kind=="fin" else "",
+        "final_writing":str(max(1,fin-0.5)) if kind=="fin" else "","final_speaking":str(fin) if kind=="fin" else "",
+        "target_band":str(target),"achievement_status":ach if kind=="fin" else "",
+        "achievement_note":"","dropout_reason":"" if kind=="fin" else random.choice(["Bận việc gia đình","Chuyển thành phố","Mất động lực học"]),
+        "transferred_note":"","next_course_recommendation":"CRS-IELTS-7.0" if kind=="fin" and fin>=6.0 else "",
+        "re_enrollment_status":re_state,"re_enrollment_contact_time":"","re_enrollment_note":"","next_enrollment_id":"",
+        "testimonial_given":"Có" if kind=="fin" and random.random()<0.3 else "","next_action":"","student_id_name":s["full_name"],"class_id_name":c.get("class_name","")}
+    if not re_state.startswith("not_contacted"):
+        row["re_enrollment_contact_time"]=F(endd+days(3))
+    ces.append(row); return row
+# Duyệt MỌI lớp đã kết thúc, đừng liệt kê tay hai lớp. Cùng một cái bẫy với vòng lặp bên dưới:
+# thêm lớp kết thúc thứ ba (lớp 1-1, 06/08) mà quên sửa dòng này thì học viên của nó không nằm
+# trong danh sách, không ai sinh bản ghi kết thúc khoá cho họ - `check_logic` bắt bằng luật 1c.
+fin_students=[SBY[r] for cid in fin_size for r in rosters.get(cid,[])]
+re2_map={s2["student_id"]:e2 for s2,e2 in re2}
+# hồ sơ cũ đóng cho dứt điểm (rejected), hồ sơ đang theo thì mới liên hệ GẦN ĐÂY; giữ đúng 1 ca
+# not_contacted làm việc đỏ có chủ đích ở hàng "mời tái ghi danh"
+re_states=["contacted (Đã liên hệ)","interested (Quan tâm, chưa quyết định)","contacted (Đã liên hệ)",
+           "rejected (Từ chối học tiếp)","rejected (Từ chối học tiếp)","rejected (Từ chối học tiếp)",
+           "contacted (Đã liên hệ)","contacted (Đã liên hệ)"]
+ri=0
+for s in fin_students:
+    # TRA THEO SỔ LỚP, ĐỪNG CẮM CỨNG TÊN LỚP. Bản cũ viết thẳng hai mã lớp đã kết thúc và cho
+    # mọi trường hợp còn lại rơi vào lớp thứ hai - nên khi thêm lớp 1-1 đã kết thúc (06/08),
+    # học viên của nó bị gán bản ghi kết thúc khoá SANG LỚP KHÁC: lớp 1-1 không có điểm đầu ra,
+    # còn lớp kia có một học viên chưa từng học ở đó. `check_logic` bắt được bằng luật 1c.
+    cid=next((c for c in fin_size if s["student_id"] in rosters.get(c,[])),None)
+    if not cid: continue
+    if s["student_id"] in re2_map:
+        r=add_ce(s,cid,"fin","confirmed_with_deposit (Đồng ý + có cọc)")
+        r["next_enrollment_id"]=re2_map[s["student_id"]]["enrollment_id"]
+        r["re_enrollment_note"]="Đã cọc khóa tiếp, vào "+re2_map[s["student_id"]]["course_id_name"]
+    else:
+        r=add_ce(s,cid,"fin",re_states[ri%len(re_states)]); ri+=1
+        if r["re_enrollment_status"].split(" ")[0] in ("contacted","interested"):
+            r["re_enrollment_contact_time"]=F(NOW-dt.timedelta(hours=random.randint(4,40)))
+for kind,s,cid in sp:
+    if kind=="drop": add_ce(s,cid,"drop","not_contacted (Chưa LH)")
+    elif kind=="trans":
+        r=add_ce(s,cid,"drop","not_contacted (Chưa LH)")
+        r.update(student_status="transferred (Bảo lưu/chuyển khóa)",dropout_reason="",
+            transferred_note="Bảo lưu vì lịch công tác/việc gia đình, hẹn quay lại trước "+str(s.get("pause_until") or FD(TODAY+days(60))),
+            re_enrollment_status="contacted (Đã liên hệ)",re_enrollment_contact_time=F(NOW-days(3)))
+for r in ces:
+    if r["achievement_status"].startswith("achieved") and not r["achievement_note"]: r["achievement_note"]="Vượt mục tiêu, giới thiệu lộ trình nâng band"
+    if r["achievement_status"].startswith("not_") : r["achievement_note"]="Đề xuất học lại 50% học phí theo chính sách cam kết"
+# C-07: testimonial CHỈ khi có final_test_score. HV đạt mục tiêu đa số đã xin cảm nhận xong,
+# chừa đúng 1 ca chưa xin (việc "xin cảm nhận" trên chuông có 1 dòng, không réo tràn).
+_ach=[r for r in ces if r["achievement_status"].startswith("achieved") and str(r["final_test_score"]).strip()]
+for r in ces:
+    if not str(r["final_test_score"]).strip(): r["testimonial_given"]=""
+for _i,r in enumerate(_ach):
+    r["testimonial_given"]="" if _i==len(_ach)-1 else "Có"
+# hồ sơ HV đầy đặn: liên hệ khẩn, email, ghi chú theo dõi
+REL=["Ông","Bà","Bố","Mẹ","Anh","Chị","Người giám hộ"]  # danh sách anh Luân chốt 30/07
+# V9.63: tên người đồng hành trước đây là chuỗi lấp chỗ trống "Người nhà <tên con>" - mở cổng phụ
+# huynh ra là lời chào đọc thành "Chào ... Người giám hộ Người nhà Hiếu". Nay tên THẬT, và giới
+# tính của tên khớp quan hệ đã khai (Bố/Ông/Anh -> tên nam, Mẹ/Bà/Chị -> tên nữ).
+_HO=["Nguyễn","Trần","Lê","Phạm","Hoàng","Vũ","Đặng","Bùi","Đỗ","Ngô","Dương","Lý"]
+_DEM_NAM=["Văn","Hữu","Đức","Quang","Minh","Thanh","Công","Xuân"]
+_DEM_NU=["Thị","Thu","Ngọc","Kim","Thanh","Minh","Phương","Hồng"]
+_TEN_NAM=["Hùng","Dũng","Sơn","Tuấn","Bình","Nam","Long","Khánh","Trung","Thắng","Hải","Cường"]
+_TEN_NU=["Lan","Hoa","Mai","Hạnh","Thuý","Nga","Yến","Vân","Trang","Loan","Hương","Thảo"]
+_NAM=("Ông","Bố","Anh")
+def _ten_nguoi_nha(rel):
+    nam = rel in _NAM
+    if rel == "Người giám hộ":
+        nam = random.random() < 0.5
+    dem = random.choice(_DEM_NAM if nam else _DEM_NU)
+    ten = random.choice(_TEN_NAM if nam else _TEN_NU)
+    return "%s %s %s" % (random.choice(_HO), dem, ten)
+for s in students:
+    if random.random()<0.65:
+        _rel=random.choice(REL)
+        s["emergency_contact_name"]=_ten_nguoi_nha(_rel)
+        s["emergency_contact_phone"]=phone(); s["emergency_contact_relation"]=_rel
+    if random.random()<0.55:
+        s["email"]=("hv"+s["student_id"][-3:]+"@gmail.com")
+    if "at_risk" in s["attendance_progress_status"]+s["academic_progress_status"]:
+        s["learning_followup_note"]=F(NOW-days(random.randint(1,5)))+": đã gọi nhắc, HV hứa đi học lại từ tuần sau"
+
+# ================= PASS 2: LẤP ĐẦY CỘT NHẬP + next_action HIỂN THỊ =================
+ADDR=["Q.1, TP.HCM","Q.3, TP.HCM","Q.7, TP.HCM","TP. Thủ Đức","Q. Bình Thạnh","Q. Gò Vấp","Q. Tân Bình","TP. Biên Hòa","TP. Thủ Dầu Một"]
+LEADNOTE=["Quan tâm khóa "+random.choice(["6.0","6.5"]),"Vừa để lại SĐT trên form","Bạn của HV cũ giới thiệu","Hỏi học phí và lịch tối","Muốn học cấp tốc trước khi du học","So sánh với trung tâm khác, cần theo sát"]
+for L in leads:
+    if not L["lead_note"] and random.random()<0.72: L["lead_note"]=random.choice(LEADNOTE)
+for t in tests:
+    if isc_bk:=t["booking_status"].startswith("booked"):
+        if not t["booking_note"] and random.random()<0.35: t["booking_note"]="Đã nhắn Zalo xác nhận lịch, dặn mang bút chì"
+for c in cons_rows:
+    if c["consultation_status"].startswith("consulted") and not c["consultation_note"]:
+        c["consultation_note"]=random.choice(["Tư vấn lộ trình theo KQ test, HV ưu tiên lịch tối","Phân tích điểm yếu Writing, đề xuất kèm WOW","Trao đổi với phụ huynh về cam kết đầu ra"])
+    if c["conversion_status"].startswith("interested") and not c["conversion_note"]:
+        c["conversion_note"]="Hẹn chốt sau khi bàn với gia đình"
+for e in enrs:
+    if not e["notes"] and random.random()<0.15: e["notes"]="Giữ chỗ lớp tối, đã gửi hợp đồng học vụ"
+for o in obs:
+    if o["onboarding_status"].startswith("completed") and not o["onboarding_note"] and random.random()<0.65:
+        o["onboarding_note"]=random.choice(["Đã vào nhóm Zalo lớp, nhận giáo trình","Đã nhận thẻ HV + tài khoản LMS","Phụ huynh xác nhận lịch đưa đón"])
+for s in students:
+    if not s["address"] and random.random()<0.75: s["address"]=random.choice(ADDR)
+    if not s["notes"] and random.random()<0.45: s["notes"]=random.choice(["Mục tiêu du học Úc 2027","Ưu tiên GV nữ","Hay đi công tác, cần học bù linh hoạt","Phụ huynh muốn nhận báo cáo hằng tháng","Đã học nền tảng ở trung tâm khác"])
+for h in hws:
+    if not h["notes"] and random.random()<0.08: h["notes"]="HV xin nộp lại bản sửa"
+for w in wows:
+    if not w["notes"] and random.random()<0.15: w["notes"]="HV chủ động xin thêm bài luyện"
+for v in surveys:
+    if v["submitted_date"]:
+        if not v["suggestions"] and random.random()<0.5: v["suggestions"]=random.choice(["Mở thêm lớp cuối tuần","Thêm buổi luyện Speaking","Gửi tài liệu trước buổi học"])
+        if not v["negative_comments"] and random.random()<0.2: v["negative_comments"]="Phòng hơi nhỏ khi lớp đông"
+for f in fbs:
+    if not f["notes"] and random.random()<0.2: f["notes"]="Đã báo GV chủ nhiệm nắm thông tin"
+for kkn in kns:
+    if not kkn["notes"] and random.random()<0.3: kkn["notes"]="Ưu tiên xử lý trong tuần"
+    if kkn["complaint_status"].startswith("resolved") and kkn["complaint_result"].startswith("accepted") and not kkn["student_feedback_after"]:
+        kkn["student_feedback_after"]="HV hài lòng với hướng xử lý"
+for r in ces:
+    st_=r["re_enrollment_status"]
+    if not r["re_enrollment_note"]:
+        if st_.startswith("contacted"): r["re_enrollment_note"]="Đã gọi giới thiệu khóa tiếp, hẹn phản hồi cuối tuần"
+        elif st_.startswith("interested"): r["re_enrollment_note"]="Quan tâm khóa 7.0, chờ lịch khai giảng"
+        elif st_.startswith("rejected"): r["re_enrollment_note"]="Tạm dừng vì đi du học/công tác"
+# next_action hiển thị cho v3 (trên sheet cột này là ARRAYFORMULA tự tính, seed bỏ qua)
+for t in tests:
+    bs=t["booking_status"];att=t["test_attendance_status"]
+    if bs.startswith("pending"): t["next_action"]="Gọi chốt lịch test trong hôm nay (slaTestBookedRemind_hours)."
+    elif bs.startswith("rejected"): t["next_action"]="Khách từ chối test - chuyển tư vấn thẳng lộ trình."
+    elif bs.startswith("cancelled"): t["next_action"]="Liên hệ đặt lại lịch test mới cho khách."
+    elif att.startswith("no_show"): t["next_action"]="Gọi hỏi lý do vắng + hẹn lại lịch test."
+    elif att and t["test_status"].startswith("pending"): t["next_action"]="Chấm bài + trả kết quả trong 48h (slaGLA_hours)."
+    elif t["test_status"].startswith("graded") and t["post_test_status"].startswith("awaiting"): t["next_action"]="Đặt lịch tư vấn kết quả với khách."
+    elif not att: t["next_action"]="Nhắc lịch test trước 1 ngày qua Zalo."
+    else: t["next_action"]=""
+for c in cons_rows:
+    if c["consultation_status"].startswith("not_"): c["next_action"]="Tư vấn lộ trình theo KQ test (slaCVT_hours)."
+    elif c["conversion_status"].startswith("interested"): c["next_action"]="Theo đuổi chốt cọc trong 3 ngày."
+    elif c["conversion_status"].startswith("undecided"): c["next_action"]="Gửi bảng học phí + ưu đãi, hẹn phản hồi."
+    else: c["next_action"]=""
+for e in enrs:
+    rem=int(e["remaining_amount"] or 0)
+    if "cancel" in e["enrollment_status"]: e["next_action"]="Xử lý hoàn tiền theo mốc CH2 (nếu chưa)."
+    elif int(e["discount_amount"] or 0)>=1000000 and not e["discount_approved_by"]: e["next_action"]="Trình quản lý duyệt chiết khấu."
+    elif rem>0: e["next_action"]="Nhắc thu "+format(rem,",").replace(",",".")+"đ còn lại."
+    else: e["next_action"]=""
+for o in obs:
+    stt=o["onboarding_status"]
+    if o["class_confirmation_status"].startswith("rejected"): o["next_action"]="HV từ chối lớp - đổi lớp khác phù hợp."
+    elif o["class_id"] and not o["class_info_sent_at"]: o["next_action"]="Gửi thông tin lớp qua Zalo trong 24h."
+    elif o["class_info_sent_at"] and not o["confirmation_time"]: o["next_action"]="Chờ HV xác nhận lớp - nhắc sau 24h."
+    elif not stt.startswith("completed"): o["next_action"]="Hoàn tất onboarding (nhóm lớp, giáo trình, LMS)."
+    else: o["next_action"]=""
+for srow in sessions:
+    ss=srow["session_status"]
+    if ss.startswith("scheduled"): srow["next_action"]="Chuẩn bị giáo án + điểm danh khi vào lớp."
+    elif ss.startswith("in_progress"): srow["next_action"]="Điểm danh + ghi giờ kết thúc khi xong buổi."
+    elif ss.startswith("completed") and not srow["teacher_note_summary"]: srow["next_action"]="Bổ sung ghi chú buổi dạy (SLA 24h)."
+    else: srow["next_action"]=""
+for h in hws:
+    hs=h["homework_status"]
+    if hs.startswith("assigned"): h["next_action"]="Thu bài khi đến hạn "+h["homework_due_date"]+"."
+    elif hs.startswith("submitted") and not str(h["graded_at"]).strip(): h["next_action"]="Chấm bài trong 48h (slaHomeworkGrading_hours)."
+    elif hs.startswith("missing"): h["next_action"]="Nhắc HV nộp bù + báo học vụ nếu tái diễn."
+    else: h["next_action"]=""
+# ═══ V2 12/08 (SALE-2 / SALE-3) - COT CON THIEU CHO LEAD VA HOC VIEN ═════════════════════
+# SALE-2, anh Luân chốt: *"trường hợp 1 số điện thoại khác có liên kết với 1 lead có sẵn, thì cho
+# phép kết nối vào như số liên hệ thứ 2 hoặc số liên hệ của người thân"*. DL02 chỉ có ĐÚNG MỘT cột
+# `phone_number` - không có chỗ nào để đặt số thứ hai, nên phải thêm cột, theo đúng lối DL09 đã có
+# sẵn `emergency_contact_name/phone/relation`.
+# SALE-3: app phải hiện nút "gửi email" khi có email và "gửi Zalo" khi có Zalo. Dữ liệu đang lệch
+# đúng hai chiều ngược nhau - LEAD có `zalo_id` mà không có email, HỌC VIÊN có `email` mà không có
+# Zalo - nên ở mỗi cổng luôn có đúng một nút không bao giờ hiện. Bù cột còn thiếu cho cả hai.
+_HOP_MAIL = ["gmail.com", "gmail.com", "yahoo.com", "outlook.com"]
+def _mailTu(ten, ma):
+    kd = unicodedata.normalize("NFD", str(ten or "")).replace("đ", "d").replace("Đ", "D")
+    kt = "".join(c for c in kd.lower() if "a" <= c <= "z") or "hv"
+    return kt[:14] + str(ma or "")[-3:] + "@" + random.choice(_HOP_MAIL)
+_QUANHE = ["Bố", "Mẹ", "Anh/Chị", "Người thân", "Số phụ của khách"]
+for _l in leads:
+    _l.setdefault("email", "")
+    if not str(_l.get("email") or "").strip() and random.random() < 0.62:
+        _l["email"] = _mailTu(_l.get("full_name"), _l.get("lead_id"))
+    # Số liên hệ thứ hai: chỉ MỘT PHẦN lead có - ngoài đời cũng vậy, và demo phải cho thấy CẢ HAI
+    # trường hợp (có số phụ / không có) thì màn hình mới lộ ra được cả hai lối đi.
+    _l.setdefault("phone_2", ""); _l.setdefault("phone_2_relation", "")
+    if not str(_l.get("phone_2") or "").strip() and random.random() < 0.28:
+        _l["phone_2"] = phone(); _l["phone_2_relation"] = random.choice(_QUANHE)
+    # SALE-9: NGAY DUOC GIAO. Khong co cot nay thi moc "om qua lau" phai muon tam ngay TAO lead -
+    # hai chuyen khac han: mot lead tao thang 5 co the vua duoc giao cho nguoi moi tuan truoc.
+    # Mac dinh giao ngay khi tao; mot phan lead da qua tay nen ngay giao tre hon (ban giao truoc do).
+    if str(_l.get("assigned_to") or "").strip():
+        _t0 = _l.get("lead_created_time") or ""
+        try:
+            _d0 = dt.datetime.strptime(_t0, "%d/%m/%Y %H:%M")
+            _l.setdefault("assigned_at", F(_d0 + days(random.choice([0, 0, 0, 3, 7, 14]))))
+        except Exception:
+            _l.setdefault("assigned_at", _t0)
+    else:
+        _l.setdefault("assigned_at", "")
+for _s in students:
+    _s.setdefault("zalo_id", "")
+    if not str(_s.get("zalo_id") or "").strip() and random.random() < 0.7:
+        _s["zalo_id"] = str(_s.get("phone_number") or "")
+
+# ---------- WOW-3: BON TIEU CHI CHAM SPEAKING + LOAI BAI / HINH THUC / PHAN THI ----------
+# Team WOW hoi *"viec nhap ket qua da nam ben OLMS - xem xet lai nhap ben nao"*; anh Luan chot
+# *"e cu lam tren app cua minh, sau nay dev tinh, cho nao trung lap dev tu can"*. App vi the GIU
+# o nhap ket qua. Man "Chi tiet dang ky" (lwXemO) da ve san sau o FC/LR/GRA/PR + Overall theo
+# dung man OLMS team dung - nhung DL14 khong he co cot nao trong so do, nen mo ra thay "-" het.
+# Ve mot cai o roi khong bao gio do vao thi cai o do la trang tri. Gieo tai NGUON.
+_WOW_LOAI=["practice (Luyện tập)","entry_test (Kiểm tra đầu khóa)","midterm (Kiểm tra giữa khóa)","final (Kiểm tra cuối khóa)"]
+_WOW_PHAN={"Speaking (Nói)":["Part 1","Part 2","Part 3","Part 1 + Part 2","Full test"],
+           "Writing (Viết)":["Task 1","Task 2","Task 1 + Task 2"],
+           "Listening (Nghe)":["Section 1-2","Section 3-4","Full test"],
+           "Reading (Đọc)":["Passage 1","Passage 2-3","Full test"]}
+_bandCuaHV={}
+for _l in leads:
+    if str(_l.get("target_band") or "").strip(): _bandCuaHV[_l["lead_id"]]=str(_l["target_band"]).strip()
+_leadCuaHV={}
+for _e in enrs:
+    if _e.get("student_id") and _e.get("lead_id"): _leadCuaHV.setdefault(_e["student_id"],_e["lead_id"])
+_clsCuaHV={}
+for _o in obs:
+    if _o.get("student_id") and _o.get("class_id"): _clsCuaHV.setdefault(_o["student_id"],_o["class_id"])
+_tenLop={c["class_id"]:c.get("class_name") or c["class_id"] for c in CLS}
+def _lamTron5(x): return round(x*2)/2.0
+for w in wows:
+    _cid=_clsCuaHV.get(w["student_id"],"")
+    w["class_id"]=_cid
+    w["class_id_name"]=_tenLop.get(_cid,"")
+    w["target_band"]=_bandCuaHV.get(_leadCuaHV.get(w["student_id"],""),"")
+    # Loai bai: buoi HV tu dat gan nhu luon la LUYEN TAP (dung cai WOW-2 cho vao thang, khong cho
+    # xac nhan); ba loai con lai la bai KIEM TRA nen van phai NV WOW xac nhan.
+    if str(w.get("wow_booked_by","")).startswith("student"):
+        w["wow_lesson_type"]=_WOW_LOAI[0] if random.random()<0.85 else random.choice(_WOW_LOAI[1:])
+    else:
+        w["wow_lesson_type"]=random.choice(_WOW_LOAI)
+    w["wow_mode"]=random.choice(["online (Trực tuyến)","offline (Tại trung tâm)","offline (Tại trung tâm)"])
+    w["wow_parts"]=random.choice(_WOW_PHAN.get(w["wow_skill"],["Full test"]))
+    # Diem CHI CO o buoi da day xong - buoi sap toi ma da co diem la vo ly, `check_logic` bat.
+    if str(w.get("wow_status","")).startswith("completed"):
+        _b=6.0
+        try: _b=float(str(w["target_band"]).split("-")[0]) if w["target_band"] else 6.0
+        except Exception: _b=6.0
+        _diem=[]
+        for _k in ("wow_score_fc","wow_score_lr","wow_score_gra","wow_score_pr"):
+            _v=min(9.0,max(3.0,_lamTron5(_b+random.choice([-1.0,-0.5,-0.5,0,0,0.5]))))
+            w[_k]=("%g"%_v); _diem.append(_v)
+        w["wow_overall"]="%g"%_lamTron5(sum(_diem)/4.0)
+    else:
+        for _k in ("wow_score_fc","wow_score_lr","wow_score_gra","wow_score_pr","wow_overall"): w[_k]=""
+for w in wows:
+    ws_=w["wow_status"]
+    if ws_.startswith("booked"): w["next_action"]="Xác nhận buổi với HV + GV."
+    elif ws_.startswith("confirmed"): w["next_action"]="Dạy buổi theo trọng tâm đã hẹn."
+    elif ws_.startswith("completed") and not w["wow_content_note"]: w["next_action"]="Ghi nội dung buổi trong 24h (slaWowNote_hours)."
+    elif ws_.startswith("no_show"): w["next_action"]="Liên hệ HV sắp xếp lại buổi (không trừ thêm quota)."
+    else: w["next_action"]=""
+for v in surveys:
+    if not v["submitted_date"]: v["next_action"]="Nhắc HV trả lời khảo sát (trong 3 ngày)."
+    elif str(v["follow_up_needed"]).strip()=="Có": v["next_action"]="Gọi follow-up điểm chưa hài lòng trong 24h."
+    else: v["next_action"]=""
+for f in fbs:
+    fs_=f["feedback_status"]
+    if fs_.startswith("new"): f["next_action"]="Phân loại + tiếp nhận phản hồi."
+    elif fs_.startswith("in_progress"): f["next_action"]="Xử lý và phản hồi lại học viên."
+    else: f["next_action"]=""
+for kkn in kns:
+    ks_=kkn["complaint_status"]
+    if ks_.startswith("new"): kkn["next_action"]="Nhận xử lý theo SLA mức độ ("+kkn["complaint_severity"].split(" ")[0]+")."
+    elif ks_.startswith("assigned"): kkn["next_action"]="Bắt đầu xử lý + liên hệ HV."
+    elif ks_.startswith("in_progress"): kkn["next_action"]="Chốt phương án + đóng khiếu nại."
+    elif ks_.startswith("escalated"): kkn["next_action"]="Quản lý cấp cao ra quyết định cuối."
+    else: kkn["next_action"]=""
+for r in ces:
+    st_=r["re_enrollment_status"]
+    if not str(r["final_test_score"]).strip() and "completed" in r["student_status"]: r["next_action"]="Nhập kết quả đầu ra trong 3 ngày (slaFinalTest_days)."
+    elif st_.startswith("not_contacted"): r["next_action"]="Mời tái ghi danh trong cửa sổ ưu đãi."
+    elif st_.startswith("contacted") or st_.startswith("interested"): r["next_action"]="Theo đuổi chốt tái ghi danh."
+    else: r["next_action"]=""
+
+# ================= XUẤT =================
+# ═══ LUẬT BẤT BIẾN: KHÔNG THU TIỀN TRƯỚC NGÀY ĐĂNG KÝ ═════════════════════════════════════
+# `check_logic` luật 6d. Trước 06/08 luật này vẫn xanh, nhưng chỉ vì MAY: các mốc thời gian
+# được bốc ngẫu nhiên và tình cờ chưa rơi vào thế sai. Thêm học viên lớp 1-1 làm chuỗi ngẫu
+# nhiên lệch đi một nhịp là lộ ngay một phiếu thu ghi trước ngày đăng ký 4 ngày.
+# Nên chốt thành BẤT BIẾN thay vì vá đúng một dòng: phiếu thu không bao giờ được sớm hơn đăng
+# ký của chính nó. Sớm hơn thì kéo về đúng ngày đăng ký cộng một khoảng ngắn.
+_enrT={e["enrollment_id"]:e.get("enrollment_time","") for e in enrs}
+for _p in pays:
+    _et=_enrT.get(_p.get("enrollment_id",""),"")
+    if not _et or not _p.get("payment_time"): continue
+    try:
+        _a=dt.datetime.strptime(_p["payment_time"],"%d/%m/%Y %H:%M")
+        _b=dt.datetime.strptime(_et,"%d/%m/%Y %H:%M")
+    except Exception: continue
+    if _a<_b: _p["payment_time"]=F(_b+dt.timedelta(hours=random.randint(1,20)))
+
+# ---------- GO DAT TRUNG GV WOW (buoi 1-1 thi mot GV khong day hai nguoi cung luc) ----------
+# Bat duoc 10/08 boi chinh phep kiem dinh vua viet cho DL26: 6 cap buoi trung (GV, gio), trong
+# do mot cap con la CUNG MOT HOC VIEN hai buoi cung luc (WOW-006 va WOW-016). `check_data.py` va
+# `check_logic.py` chua tung hoi cau nay - chung hoi quan he giua cac moc thoi gian, khong hoi
+# "mot nguoi co the o hai cho cung luc khong".
+# Go bang cach doi GIO (giu nguyen GV va NGAY) sang mot khung con trong; het khung thi doi GV.
+_ban={}
+for _w in wows:
+    _d=str(_w.get("wow_session_date") or "").strip()
+    if not _d or str(_w.get("wow_status","")).startswith("cancelled"): continue
+    _k=(_w["staff_id"],_d)
+    if _k not in _ban: _ban[_k]=_w["wow_id"]; continue
+    try: _khi=dt.datetime.strptime(_d,"%d/%m/%Y %H:%M")
+    except Exception: continue
+    _xong=False
+    for _h in [9,15,17,19]:
+        _m=_khi.replace(hour=_h)
+        if (_w["staff_id"],F(_m)) not in _ban:
+            _w["wow_session_date"]=F(_m); _ban[(_w["staff_id"],F(_m))]=_w["wow_id"]; _xong=True; break
+    if _xong: continue
+    for _nv in WOWS:
+        if _nv[0]==_w["staff_id"]: continue
+        if (_nv[0],_d) not in _ban:
+            _w["staff_id"],_w["staff_name"]=_nv[0],_nv[1]; _ban[(_nv[0],_d)]=_w["wow_id"]; _xong=True; break
+    if not _xong: _w["wow_status"]="cancelled (Đã hủy)"   # het cho that thi khai thang, dung giau
+
+# ---------- DL26 · LICH TRUC NV WOW (SOP: "BANG TRUC NV WOW - THEO THANG") ----------
+# Anh Luan dat 10/08: *"moi nguoi team wow co the tu book lich lam viec cua minh... no luu vao
+# lich tong va hoc vien co the chon dua tren lich nay"*. SOP da thiet ke san man nay - luoi
+# cot=ngay, hang=khung gio, **o trong = khong ai truc** - va da co san danh muc
+# `enum_wow_slot_status`: available / booked / taught / off. App truoc nay khong dung chu nao.
+#
+# LUAT SINH, viet ra de doc lai duoc:
+#  · moi NV WOW dang ky ca trong cua so [-30 ngay, +30 ngay], nghi ngau nhien mot so ngay;
+#  · khung gio dung DUNG khung day cua trung tam (cung nguon voi `gioHoc`), khong bia khung moi;
+#  · slot nao trung gio mot buoi WOW da co thi mang dung trang thai cua buoi ay:
+#    buoi da hoan thanh -> `taught`, buoi con treo -> `booked`, va giu ma buoi de doi chieu;
+#  · mot phan nho slot de `off (Nghi/Ban)` - de man hinh co ca ba trang thai that, khong phai
+#    chi hai. Danh muc khai bon gia tri thi demo phai cho thay du bon, khong thi mot gia tri
+#    song trong danh muc ma chet tren man.
+# **Slot phai PHU HET buoi WOW da co**: neu mot buoi nam ngoai moi ca truc thi lich tong va so
+# buoi that noi nguoc nhau ngay tu ngay dau - dung cai ma SOP bao la phai doi chieu.
+# KHUNG_TRUC khai o phan DL14 ben tren - buoi WOW phai roi dung khung ngay tu luc sinh.
+wow_slots=[]; _sl=0
+_wowByKey={}
+# BUOI DA HUY THI CA TRA VE TRONG. Cot doi chieu cua man Lich truc bat duoc ngay lan chay dau:
+# ca ba NV deu "lech" vi buoi huy van giu ca. Doi song: huy roi thi gio do ai dat cung duoc.
+for _w in wows:
+    _d=str(_w.get("wow_session_date") or "").strip()
+    if not _d or str(_w.get("wow_status","")).startswith("cancelled"): continue
+    _wowByKey.setdefault((_w["staff_id"],_d),[]).append(_w)
+def _themSlot(nv, khi, trang_thai, wid=""):
+    global _sl
+    _sl+=1
+    return {"slot_id":"SLOT-%04d"%_sl,"staff_id":nv[0],"staff_name":nv[1],
+            "slot_date":FD(khi),"slot_time":khi.strftime("%H:%M"),
+            "slot_datetime":F(khi),"branch":random.choice(BRANCHES),
+            "wow_slot_status":trang_thai,"wow_id":wid,
+            "registered_at":F(khi-days(random.randint(3,10))),"note":""}
+for _nv in WOWS:
+    for _off in range(-30,31):
+        _ngay=(NOW+days(_off)).replace(hour=0,minute=0)
+        if _ngay.weekday()==6 and random.random()<0.7: continue      # chu nhat phan lon nghi
+        if random.random()<0.18: continue                            # ngay nghi rai rac
+        # O 30 phut nen mot nguoi truc lien mot khuc 2-4 tieng = 4-8 o. Lay mot KHUC LIEN TIEP
+        # chu khong boc ngau nhien ray rac: khong ai truc 09:00 roi nghi toi 15:00 roi truc tiep.
+        _n=random.randint(4,8); _b=random.randint(0,max(0,len(KHUNG_TRUC)-_n))
+        for _hm in KHUNG_TRUC[_b:_b+_n]:
+            _khi=_ngay.replace(hour=_hm[0],minute=_hm[1])
+            _co=_wowByKey.get((_nv[0],F(_khi)))
+            if _co:
+                _w=_co[0]
+                _tt="taught (Đã dạy xong)" if str(_w.get("wow_status","")).startswith("completed") else "booked (Đã có người đặt)"
+                wow_slots.append(_themSlot(_nv,_khi,_tt,_w["wow_id"]))
+            elif _off<0:
+                # ca da qua ma khong ai dat: van la ca da dang ky, chi la trong
+                wow_slots.append(_themSlot(_nv,_khi,"available (Còn trống)"))
+            elif random.random()<0.10:
+                wow_slots.append(_themSlot(_nv,_khi,"off (Nghỉ/Bận)"))
+            elif random.random()<0.12:
+                # OLMS co o UNAVAILABLE rieng: NV co truc ca do nhung khung nay khong nhan.
+                # Danh muc khai bao nhieu gia tri thi demo phai cho thay du bay nhieu.
+                wow_slots.append(_themSlot(_nv,_khi,"unavailable (Không nhận)"))
+            else:
+                wow_slots.append(_themSlot(_nv,_khi,"available (Còn trống)"))
+# PHU HET buoi WOW da co: buoi nao chua co slot thi mo them mot ca dung gio do
+_daCo={(x["staff_id"],x["slot_datetime"]) for x in wow_slots}
+for _w in wows:
+    _d=str(_w.get("wow_session_date") or "").strip()
+    if not _d or str(_w.get("wow_status","")).startswith("cancelled") or (_w["staff_id"],_d) in _daCo: continue
+    try: _khi=dt.datetime.strptime(_d,"%d/%m/%Y %H:%M")
+    except Exception: continue
+    _nv=(_w["staff_id"], _w.get("staff_name") or _w["staff_id"])
+    _tt="taught (Đã dạy xong)" if str(_w.get("wow_status","")).startswith("completed") else "booked (Đã có người đặt)"
+    wow_slots.append(_themSlot(_nv,_khi,_tt,_w["wow_id"]))
+    _daCo.add((_w["staff_id"],_d))
+
+dl_new={"DL01":STAFF,"DL02":leads,"DL02b":tps,"DL03":tests,"DL04":cons_rows,"DL05":COURSES,"DL06":enrs,"DL07":pays,
+        "DL08":obs,"DL09":students,"DL10":CLS,"DL11":sessions,"DL12":atts,"DL13":hws,"DL14":wows,"DL15":surveys,
+        "DL16":fbs,"DL17":kns,"DL18":ces,"DL26":wow_slots}
+out={"dl":dl_new,"enums":old.get("enums"),"config":old.get("config")}
+
+# ---------- CH2: hai tham so cua LICH TRUC WOW ----------
+# LUAT DU AN: moi hang so nghiep vu di qua CH2, va `_check16`/`_check18` doi moi tham so app DOC
+# thi phai co O SUA trong man Cai dat - khong thi anh Luan thay mot con so ma khong doi duoc.
+# Verify tron bo bat ngay lan dau: "khong con tham so app doc ma khong co o sua (wowSlotHours,
+# wowSlotMaxDays)". Them tai NGUON de moi lan dung lai deu co, khong phai va tay vao JSON.
+# DANH MUC: them `unavailable` cho trang thai o truc - OLMS co o "UNAVAILABLE" rieng, khac
+# `off` (bao nghi ca) o cho: NV VAN truc ca do, chi khung nay khong nhan. Upsert tai NGUON,
+# khong sua tay demo_base.json - file base la ban chup dung yen, sua tay la mat dau vet.
+_en = out.setdefault("enums", {}) or {}
+out["enums"] = _en
+_ss = _en.setdefault("enum_wow_slot_status", [])
+if not any(str(x).startswith("unavailable") for x in _ss):
+    _ss.append("unavailable (Không nhận)")
+# WOW-2/WOW-3: hai danh muc moi. `wow_lesson_type` khong phai trang tri - no la thu QUYET DINH
+# buoi HV tu dat co phai cho NV WOW xac nhan khong (luyen tap thi vao thang, bai kiem tra thi cho).
+# Ghi de bang danh sach chuan de ban base cu khong giu lai bo gia tri thieu.
+# 12/08 - NHAN LA "Kiem tra dau khoa", KHONG PHAI "Test dau vao". Hai thu KHAC HAN nhau ma luc
+# dau em dat cung mot ten:
+#   · "Test dau vao" (DL03) = bai test mot LEAD lam TRUOC khi ghi danh - viec cua phe tuyen sinh
+#   · WOW `entry_test`      = bai kiem tra trinh do cua mot HOC VIEN DA GHI DANH, dau khoa hoc
+# `_checkmien` bat duoc vi chu "Test dau vao" hien tren Lich truc WOW cho Truong phong ACA -
+# nguoi khai `lead:"none"`. Doi ten khong phai de lach bo kiem: no la ten DUNG HON, va cai lech
+# ten ay chinh la thu lam bo kiem tuong day la du lieu mien lead.
+_en["enum_wow_lesson_type"]=["practice (Luyện tập)","entry_test (Kiểm tra đầu khóa)",
+                             "midterm (Kiểm tra giữa khóa)","final (Kiểm tra cuối khóa)"]
+_en["enum_wow_mode"]=["online (Trực tuyến)","offline (Tại trung tâm)"]
+# SALE-6: tach "hinh thuc test" thanh HAI cau hoi. `enum_test_format` giu nguyen (online/offline),
+# `enum_test_kind` la cau hoi thu hai - thi thu hay thi that. Hai chuyen doc lap nhau.
+_en["enum_test_kind"]=["mock (Thi thử tại trung tâm)","official (Thi thật tại hội đồng)"]
+
+# ═══ 12/08 - NGUONG HCR 0.8 -> 0.9 (anh Luan thong bao) ════════════════════════════════════
+# *"Hoc vien phai dam bao 90% khoi luong BTVN va tham gia day du 2 bai kiem tra Midterm/Final."*
+# Nguong nay nam o CH6 (bang chi so), khong phai CH2. Upsert TAI NGUON chu khong sua tay
+# `demo_base.json` - file base la ban chup dung yen, sua tay la mat dau vet.
+_ch6 = (out.get("config") or {}).setdefault("ch6", [])
+for _k in _ch6:
+    if str(_k.get("code")) == "HCR":
+        _k["threshold"] = 0.9
+        _k["name"] = "Homework Completion Rate - Tỷ lệ hoàn thành bài tập (chuẩn tốt nghiệp: 90%)"
+
+_ch2 = (out.get("config") or {}).setdefault("ch2", [])
+_ch2By = {str(x.get("name")): x for x in _ch2}
+for _t in [
+    {"name":"wowShifts","value":"Ca sáng|09:00|12:30, Ca chiều|12:30|17:30, Ca tối|17:30|21:30","unit":"ca",
+     "meaning":"Ba ca trực trong ngày. Mỗi ca ghi \"Tên|Giờ bắt đầu|Giờ kết thúc\", các ca ngăn nhau bằng dấu phẩy. Khung giờ trên lưới tự sinh ra từ đây.",
+     "suggested":"Ba ca sáng/chiều/tối như OLMS đang chạy. Đổi giờ mở cửa thì sửa ở đây, lưới đổi theo."},
+    {"name":"wowSlotMinutes","value":30,"unit":"phút",
+     "meaning":"Mỗi ô trên lịch trực dài bao nhiêu phút.",
+     "suggested":"30 phút - đúng độ dài ô của OLMS. Đổi thành 60 thì lưới tự gộp lại còn một nửa số hàng."},
+    {"name":"wowWeeksAhead","value":2,"unit":"tuần",
+     "meaning":"Học viên xem trước được lịch WOW của bao nhiêu tuần.",
+     "suggested":"2 tuần - đúng con số trong màn Cấu hình của OLMS."},
+    {"name":"wowBookLeadDays","value":1,"unit":"ngày",
+     "meaning":"Học viên phải đặt buổi WOW trước ít nhất bao nhiêu ngày. Đặt sát giờ hơn mức này thì app chặn.",
+     "suggested":"1 ngày - để NV WOW còn kịp chuẩn bị nội dung buổi."},
+    {"name":"wowCancelMinDays","value":1,"unit":"ngày",
+     "meaning":"Muốn huỷ buổi WOW thì phải huỷ trước ít nhất bao nhiêu ngày.",
+     "suggested":"1 ngày - huỷ sát giờ là ca trực bỏ trống, không ai đặt kịp."},
+    {"name":"wowSlotMaxDays","value":60,"unit":"ngày",
+     "meaning":"Mỗi lần đăng ký ca trực, NV WOW được nhận tối đa bao nhiêu ngày liên tiếp.",
+     "suggested":"60 ngày (khoảng 2 tháng). Đặt ngắn hơn nếu muốn team đăng ký lại theo tháng."},
+    {"name":"wowCommitHours_month","value":40,"unit":"giờ/tháng",
+     "meaning":"Mỗi NV WOW cam kết trực bao nhiêu giờ một tháng. Bảng Tổng giờ trực lấy mốc này để báo 'Thiếu ...h'.",
+     "suggested":"40 giờ/tháng - đúng con số cột 'Cam kết/tháng' trong sheet DL19 của SOP."}]:
+    # GHI DE, KHONG PHAI "chua co thi them". Ban dau em viet `if ten not in daCo: append` - va no
+    # da can ngay: `gen_demo` doc lai `config` tu chinh demo_data_big.json cua lan chay TRUOC, nen
+    # gia tri cu (4 khung gio) song sot qua moi lan dung lai, de len ban moi. Ca 537 ca truc bi
+    # cham "lech khung" trong khi ma nguon da doi tu lau. File nay LA NGUON cua ban mau demo -
+    # nguon thi phai ghi de, khong nhuong cho ban sao cu.
+    _cu = _ch2By.get(_t["name"])
+    if _cu is None: _ch2.append(_t); _ch2By[_t["name"]] = _t
+    else: _cu.update(_t)
+
+# ---------- KIỂM ĐỊNH ----------
+err=[]
+def chk(cond,msg):
+    if not cond: err.append(msg)
+pkmap={"DL02":"lead_id","DL02b":"touchpoint_id","DL03":"test_booking_id","DL04":"consultation_id","DL06":"enrollment_id","DL07":"payment_id","DL08":"onboarding_id","DL09":"student_id","DL11":"session_id","DL12":"attendance_id","DL13":"homework_id","DL14":"wow_id","DL15":"survey_id","DL16":"feedback_id","DL17":"complaint_id","DL18":"course_end_id"}
+for k,pk in pkmap.items():
+    ids=[r[pk] for r in dl_new[k]]
+    chk(len(ids)==len(set(ids)),k+" trùng PK")
+# --- DL26 lich truc WOW: kiem dinh ngay tai nguon ---
+# Sinh ra roi phai HOI LAI, khong tin tay minh vua viet. Ba cau:
+_slotKey={(x["staff_id"],x["slot_datetime"]) for x in wow_slots}
+chk(len({x["slot_id"] for x in wow_slots})==len(wow_slots),"DL26 trung slot_id")
+chk(len(_slotKey)==len(wow_slots),"DL26 trung ca (cung NV, cung gio)")
+_sot=[w["wow_id"] for w in wows if str(w.get("wow_session_date") or "").strip()
+      and not str(w.get("wow_status","")).startswith("cancelled")
+      and (w["staff_id"],str(w["wow_session_date"]).strip()) not in _slotKey]
+chk(not _sot,"DL26 khong phu het buoi WOW - sot %d buoi (%s)"%(len(_sot),", ".join(_sot[:4])))
+# moi buoi da co phai duoc slot ghi nhan bang dung ma buoi, khong chi trung gio
+_link={x["wow_id"] for x in wow_slots if str(x.get("wow_id") or "").strip()}
+_thieu=[w["wow_id"] for w in wows if str(w.get("wow_session_date") or "").strip()
+        and not str(w.get("wow_status","")).startswith("cancelled") and w["wow_id"] not in _link]
+chk(not _thieu,"DL26 co ca trung gio ma khong noi ma buoi - %d buoi (%s)"%(len(_thieu),", ".join(_thieu[:4])))
+# CA DA CO NGUOI DAT phai BANG so buoi that (khong tinh buoi huy) - dung cot doi chieu ma SOP doi
+_caBan=collections.Counter(x["staff_id"] for x in wow_slots
+                           if str(x["wow_slot_status"]).split(" ")[0] in ("booked","taught"))
+_buoiThat=collections.Counter(w["staff_id"] for w in wows
+                              if str(w.get("wow_session_date") or "").strip()
+                              and not str(w.get("wow_status","")).startswith("cancelled"))
+for _nv in set(list(_caBan)+list(_buoiThat)):
+    chk(_caBan[_nv]==_buoiThat[_nv],
+        "DL26 %s: %d ca da dat nhung %d buoi that - lich truc va so WOW noi nguoc nhau"%(_nv,_caBan[_nv],_buoiThat[_nv]))
+
+# MOI CA PHAI NAM DUNG MOT KHUNG GIO CUA LUOI. Ca lech khung thi bang tong van dem no, con luoi
+# thi khong ve ra - hai cho tren cung mot man noi hai chuyen ma khong ai biet ben nao dung.
+_khungTxt={"%02d:%02d"%(h,m) for h,m in KHUNG_TRUC}
+_lech=[x["slot_id"] for x in wow_slots if str(x.get("slot_time") or "") not in _khungTxt]
+chk(not _lech,"DL26 co %d ca lech khung gio (%s) - luoi truc se khong ve ra chung"
+    %(len(_lech),", ".join(_lech[:4])))
+
+# danh muc khai bon gia tri thi demo phai cho thay du bon
+_tt={str(x["wow_slot_status"]).split(" ")[0] for x in wow_slots}
+for _c in ["available","booked","taught","off","unavailable"]:
+    chk(_c in _tt,"DL26 thieu trang thai '%s' - danh muc khai ma man hinh khong bao gio thay"%_c)
+
+lead_ids={L["lead_id"] for L in leads}; stu_ids={s["student_id"] for s in students}
+cls_ids={c["class_id"] for c in CLS}; ses_ids={s["session_id"] for s in sessions}; enr_ids={e["enrollment_id"] for e in enrs}
+for t in tps: chk(t["lead_id"] in lead_ids,"TP lead?")
+for t in tests: chk(t["lead_id"] in lead_ids,"TB lead?")
+for c in cons_rows: chk(c["lead_id"] in lead_ids,"CS lead?")
+for e in enrs: chk(e["lead_id"] in lead_ids,"ENR lead?")
+for p in pays: chk(p["enrollment_id"] in enr_ids,"PAY enr?")
+for o in obs:
+    chk(o["student_id"] in stu_ids,"OB stu?")
+    if o["class_id"]: chk(o["class_id"] in cls_ids,"OB cls?")
+for a in atts:
+    chk(a["session_id"] in ses_ids,"AT ses? "+a["session_id"]); chk(a["student_id"] in stu_ids,"AT stu?")
+for h in hws: chk(h["class_id"] in cls_ids and h["student_id"] in stu_ids and h["session_id"] in ses_ids,"HW fk?")
+for w in wows: chk(w["student_id"] in stu_ids,"WOW stu?")
+for v in surveys: chk(v["student_id"] in stu_ids,"SUR stu?")
+for f in fbs: chk(f["student_id"] in stu_ids,"FB stu?")
+for kkn in kns: chk(kkn["student_id"] in stu_ids,"KN stu?")
+for e in enrs:
+    paid=sum(p["amount"] for p in pays if p["enrollment_id"]==e["enrollment_id"])
+    chk(paid==int(e["paid_amount"]),"ENR paid lệch "+e["enrollment_id"])
+    chk(int(e["paid_amount"])+int(e["remaining_amount"])==int(e["final_fee"]) or e["payment_status"].startswith("refunded"),"ENR balance "+e["enrollment_id"])
+for L in leads:
+    chk(int(L["contact_count"])==sum(1 for t in tps if t["lead_id"]==L["lead_id"]),"lead count "+L["lead_id"])
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# V9.66 - PHỦ ĐỀU TỪNG NGÀY, KHÔNG CHỈ ĐỦ TRONG TUẦN (anh Luân đặt 31/07)
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# Bản trước chỉ canh "≥5 buổi WOW trong 7 ngày tới". Nhưng 5 cái rải trên 7 ngày thì vẫn có ngày
+# TRỐNG - và app kéo dữ liệu theo BỘI SỐ 7 NGÀY (giữ nguyên thứ trong tuần, chủ ý đúng) nên chỗ
+# trống ấy KHÔNG BAO GIỜ tan ra: mở app đúng thứ đó là mãi mãi thấy số 0.
+# Đo thật trước khi sửa - số hiện trên thẻ khi mở app từng ngày trong tuần:
+#     Tới hẹn hôm nay   T2=1   T3=7  T4=6  T5=5  T6=15  T7=4  CN=4
+#     Buổi WOW hôm nay  T2=1   T3=0  T4=3  T5=2  T6=3   T7=2  CN=2
+#     Test hôm nay      T2=1   T3=1  T4=6  T5=9  T6=3   T7=1  CN=2
+# Thứ Ba mở app: KHÔNG có buổi WOW nào. Thứ Hai: đúng 1 cái hẹn, trong khi thứ Sáu 15 cái.
+# App không hỏng, nhưng người xem demo sẽ nghĩ nó hỏng - hoặc nghĩ trung tâm không có việc gì làm.
+#
+# CỬA SỔ PHẢI PHỦ LÀ 0..+7 NGÀY. Phép kéo (`tshDays` trong app) dùng floor bội số 7, nên mốc neo
+# LUÔN nằm ở hoặc TRƯỚC hôm nay: "hôm nay" thật rơi vào khoảng 0..6 ngày SAU mốc neo. Dòng gieo ở
+# ngày +k của bản gốc sẽ hiện ra cách hôm nay k-(0..6) ngày, tức phủ đủ từ hôm nay tới +7.
+# ĐỪNG phủ ngày ÂM: dòng "Đã đặt/Đã xác nhận" mà ngày dạy trước ngày gieo là dữ liệu tự mâu thuẫn -
+# check_logic bắt ngay (7h). Đã cắn: bản đầu để tu=-3 theo lối nghĩ round cũ, ra 6 buổi WOW quá hạn.
+#
+# CÁCH LÀM: không gieo thêm dòng mới (thêm dòng là lệch mọi con số đếm của 20 bộ kiểm). Chỉ DỜI
+# NGÀY của những dòng đã có sang các ngày đang trống, và chỉ dời dòng ở TƯƠNG LAI/gần hiện tại -
+# không đụng vào dòng lịch sử đã hoàn thành.
+# Dời ngày thì phải KÉO THEO CÁC MỐC PHỤ THUỘC (`truoc`): ngày đặt lịch phải trước ngày dạy, dời
+# buổi dạy lên sớm mà quên ngày đặt là đẻ ra lỗi 7f.
+def _ngay(v):
+    try: return dt.datetime.strptime(v,"%d/%m/%Y %H:%M")
+    except Exception: return None
+def _phuDeu(arr, cot, dieukien, gio, moiNgay, tu=0, den=7, truoc=()):
+    """Dời ngày các dòng khớp `dieukien` sao cho mỗi ngày trong [tu..den] có ít nhất `moiNgay` dòng."""
+    def _keo(r):
+        """Sau khi dời `cot`, kéo các mốc trong `truoc` về trước nó nếu bị vượt."""
+        m=_ngay(r.get(cot,""))
+        if not m: return
+        for c in truoc:
+            v=_ngay(r.get(c,""))
+            if v and v>=m: r[c]=F((m-days(1)).replace(hour=10,minute=0))
+    ung=[r for r in arr if dieukien(r) and _ngay(r.get(cot,""))]
+    if not ung: return 0
+    dem={}
+    for r in ung:
+        k=(_ngay(r[cot]).date()-TODAY.date()).days
+        if tu<=k<=den: dem[k]=dem.get(k,0)+1
+    thieu=[k for k in range(tu,den+1) for _ in range(max(0,moiNgay-dem.get(k,0)))]
+    if not thieu: return 0
+    # Ưu tiên lấy dòng ở ngày ĐANG DƯ nhất để lấp - giữ tổng không đổi, chỉ san phẳng.
+    def _du(r):
+        k=(_ngay(r[cot]).date()-TODAY.date()).days
+        return -(dem.get(k,0) if tu<=k<=den else 99)
+    kho=sorted([r for r in ung if dem.get((_ngay(r[cot]).date()-TODAY.date()).days,0)>moiNgay
+                or not (tu<=(_ngay(r[cot]).date()-TODAY.date()).days<=den)], key=_du)
+    doi=0
+    for k in thieu:
+        if not kho: break
+        r=kho.pop(0)
+        cu=(_ngay(r[cot]).date()-TODAY.date()).days
+        if tu<=cu<=den:
+            dem[cu]=dem.get(cu,1)-1
+        d=(TODAY+days(k)).replace(hour=random.choice(gio),minute=0)
+        r[cot]=F(d); _keo(r); dem[k]=dem.get(k,0)+1; doi+=1
+    # PHA 2 - HẠ ĐỈNH. Chỉ nâng sàn thì hết ngày trống nhưng vẫn còn ngày dồn cục: đo sau pha 1
+    # ra thứ Sáu 15 cái hẹn còn thứ Hai 3 - lệch 5 lần, nhìn vẫn không ra một trung tâm chạy đều.
+    # Đỉnh đó là CỐ Ý cũ: pipeline gieo ">=6 lead hẹn ĐÚNG HÔM NAY" để bàn trực luôn có việc. Ý
+    # đó đúng, nhưng nay sàn từng ngày đã lo việc ấy rồi, nên cái đỉnh chỉ còn là chỗ lệch.
+    tran=max(moiNgay+1,int(round(moiNgay*1.8)))
+    for _ in range(60):
+        cao=max(range(tu,den+1),key=lambda k:dem.get(k,0))
+        thap=min(range(tu,den+1),key=lambda k:dem.get(k,0))
+        if dem.get(cao,0)<=tran or dem.get(cao,0)-dem.get(thap,0)<=1: break
+        cand=[r for r in ung if (_ngay(r[cot]).date()-TODAY.date()).days==cao]
+        if not cand: break
+        r=cand[0]
+        d=(TODAY+days(thap)).replace(hour=random.choice(gio),minute=0)
+        r[cot]=F(d); _keo(r); dem[cao]-=1; dem[thap]=dem.get(thap,0)+1; doi+=1
+    return doi
+_sanphang={}
+_sanphang["hẹn liên hệ"]=_phuDeu(leads,"next_followup_time",
+    lambda L: L["lead_status"].split(" ")[0] in ("new","contacted","considering","no_response"),
+    [9,10,14,16,19], 3)
+_sanphang["buổi WOW"]=_phuDeu(wows,"wow_session_date",
+    lambda w: w["wow_status"].split(" ")[0] in ("booked","confirmed"),
+    [9,15,19], 2, truoc=("booking_date",))
+_sanphang["test đầu vào"]=_phuDeu(tests,"test_date",
+    # DUNG DOI NGAY MOT CA TEST DA DIEN RA. Dieu kien cu chi hoi `test_attendance_status`, nen
+    # mot phieu DA CHAM ma o diem danh con trong van bi doi ngay thi - keo gio thi ve SAU gio
+    # cham. `check_logic` 13c bat duoc hai phieu (TB-2026-095, -097: thi 07/08 ma cham 05/08).
+    # Da co ket qua, da co gio diem danh, hay da chot trang thai thi ca ay thuoc ve qua khu.
+    lambda t: t["booking_status"].startswith("booked") and not t["test_attendance_status"]
+              and not str(t.get("test_attendance_time") or "").strip()
+              and not str(t.get("result_time") or "").strip()
+              and not str(t.get("test_status") or "").strip(),
+    [9,14,19], 2)
+print("SAN PHANG THEO NGAY (doi ngay, khong them dong):",
+      ", ".join("%s %d dong"%(k,v) for k,v in _sanphang.items()))
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# Ô CHẾT - THẺ CÓ TRÊN BẢNG VIỆC MÀ KHÔNG NGÀY NÀO SÁNG (V9.66)
+# ═══════════════════════════════════════════════════════════════════════════════════════════
+# `_checkdemo.js` đóng vai từng nhân viên mở app suốt 7 thứ trong tuần rồi hỏi từng ô một. Ba ô
+# dưới đây chưa bao giờ có số - không phải app hỏng mà là DỮ LIỆU DEMO không có tình huống đó,
+# nên người xem demo không bao giờ thấy tính năng đứng sau ô ấy.
+# Ô nào ĐÚNG là nên bằng 0 (kiểu "Quá hạn", "Nguồn đang kém") thì khai ở RONGDUOC trong bộ kiểm
+# kèm lý do, chứ không gieo bừa dữ liệu xấu cho thẻ sáng lên.
+_ochet=[]
+# 1. Lead chưa ai phụ trách - để trình được nút "Chia đều cho đội tư vấn" ở màn Bàn giao lead.
+_songs=[L for L in leads if L["lead_status"].split(" ")[0] in ("new","contacted") and L.get("assigned_to")]
+for L in _songs[:3]:
+    L["assigned_to"]=""; L["assigned_to_name"]=""
+    L["lead_note"]=(L.get("lead_note") or "").strip()
+    _ochet.append("lead chua ai phu trach")
+# 2. Buổi đã dạy còn thiếu mốc giờ vào/ra - việc Nhân sự phải đi đòi trước khi chốt bảng công.
+_xong=[s for s in sessions if s["session_status"].startswith("completed")
+       and s.get("class_start_actual") and s.get("class_end_actual")]
+for s_ in _xong[-2:]:
+    s_["class_end_actual"]=""; s_["teacher_late_minutes"]=""
+    s_["notes"]=(s_.get("notes") or "").strip() or "GV quên bấm giờ ra - nhân sự nhắc bổ sung"
+    _ochet.append("buoi thieu moc gio")
+# 3. LEAD QUA HAN CHAM SOC (V2 12/08, SALE-9). Do that tren ban demo: 82 lead con song, KHONG
+#    MOT LEAD NAO qua moc - the "Du dieu kien thu ve" hien 0 va nut "Thu lead qua han" khong co
+#    so, tuc mot tinh nang vua dung xong ma nguoi mo demo khong bao gio nhin thay.
+#    Gieo DU HAI VE de ca hai moc deu co dip len tieng: bon lead "bo be" (lau khong ai lien he)
+#    va ba lead "om lau" (duoc giao tu lau ma van chua ra ket qua, tuy van co lien he gan day).
+_ung=[L for L in leads if L["lead_status"].split(" ")[0] in ("new","contacted","test_done")
+      and L.get("assigned_to")]
+for L in _ung[:4]:
+    _cu=NOW-days(random.randint(18,40))
+    L["last_contact_time"]=F(_cu)
+    L["next_followup_time"]=""
+    L["lead_note"]=(L.get("lead_note") or "").strip()
+    _ochet.append("lead qua han cham soc (bo be)")
+for L in _ung[4:7]:
+    L["assigned_at"]=F(NOW-days(random.randint(50,80)))
+    L["last_contact_time"]=F(NOW-days(random.randint(1,5)))    # van goi, nhung om mai khong ra
+    _ochet.append("lead om qua lau")
+print("O CHET DA GIEO TINH HUONG:", ", ".join(sorted(set(_ochet))) or "khong con")
+# feature coverage
+def cnt(pred,arr): return sum(1 for x in arr if pred(x))
+cov={
+ "duyet_pending":cnt(lambda e:int(e["discount_amount"])>=1000000 and not e["discount_approved_by"],enrs),
+ "refund_queue":cnt(lambda e:("cancelled" in e["enrollment_status"] or e["cancellation_reason"]) and "hoàn tiền" not in str(e["notes"]).lower(),enrs),
+ "unverified":cnt(lambda p:not p["verified_by"],pays),
+ "sess_upcoming7":cnt(lambda s:s["session_status"].startswith("scheduled") and TODAY<=dt.datetime.strptime(s["session_date"],"%d/%m/%Y %H:%M")<TODAY+days(7),sessions),
+ "test_upcoming7":cnt(lambda t:t["booking_status"].startswith("booked") and t["test_date"] and not t["test_attendance_status"] and TODAY<=dt.datetime.strptime(t["test_date"],"%d/%m/%Y %H:%M")<TODAY+days(7),tests),
+ "wow_upcoming7":cnt(lambda w:w["wow_status"].split(" ")[0] in("booked","confirmed") and TODAY<=dt.datetime.strptime(w["wow_session_date"],"%d/%m/%Y %H:%M")<TODAY+days(7) if w["wow_session_date"] else False,wows),
+ "call_upcoming7":cnt(lambda L:L["next_followup_time"] and TODAY<=dt.datetime.strptime(L["next_followup_time"],"%d/%m/%Y %H:%M")<TODAY+days(7) and L["lead_status"].split(" ")[0] in("new","contacted","considering"),leads),
+ "hw_cho_cham":cnt(lambda h:h["homework_status"].split(" ")[0] in("submitted_on_time","submitted_late") and not h["graded_at"],hws),
+ "hw_chua_thu":cnt(lambda h:h["homework_status"].startswith("assigned"),hws),
+ "ob_need_send":cnt(lambda o:o["class_id"] and not o["class_info_sent_at"] and not o["onboarding_status"].startswith("completed"),obs),
+ "ob_rejected":cnt(lambda o:o["class_confirmation_status"].startswith("rejected"),obs),
+ "sv_followup":cnt(lambda v:str(v["follow_up_needed"]).strip()=="Có",surveys),
+ "fb_neg_new":cnt(lambda f:f["feedback_type"].startswith("negative") and f["feedback_status"].startswith("new"),fbs),
+ "kn_link":cnt(lambda f:f["related_complaint_id"],fbs),
+ "wow_nonote":cnt(lambda w:w["wow_status"].startswith("completed") and not w["wow_content_note"],wows),
+ "risk_students":cnt(lambda s:"at_risk" in s["attendance_progress_status"]+s["academic_progress_status"] or "off_track" in s["attendance_progress_status"]+s["academic_progress_status"],students),
+}
+cov.update({
+ "test_late":cnt(lambda t:"late" in t["test_attendance_status"],tests),
+ "test_cancelled":cnt(lambda t:"cancelled" in t["booking_status"],tests),
+ "test_refused":cnt(lambda t:"rejected" in t["booking_status"],tests),
+ "sess_inprog":cnt(lambda s:"in_progress" in s["session_status"],sessions),
+ "sess_cancelled":cnt(lambda s:"cancelled" in s["session_status"],sessions),
+ "gv_note_sla":cnt(lambda s:s["teacher_note_within_sla"]!="",sessions),
+ "installment":cnt(lambda p:"installment" in p["payment_method"],pays),
+ "fee_gd":cnt(lambda p:int(p["transaction_fee"] or 0)>0,pays),
+ "quota_het":cnt(lambda s:s["wow_quota_remaining"]=="0" and s["student_status"].startswith("active"),students),
+ "quota_extra":cnt(lambda s:int(s["wow_extra_approved"] or 0)+int(s["wow_extra_purchased"] or 0)>0,students),
+ "wow_note_tre":cnt(lambda w:w["sla_content_note_24h"]=="Trễ hạn",wows),
+ "kn_rejected_result":cnt(lambda x:"rejected" in x["complaint_result"],kns),
+ "kn_pending_result":cnt(lambda x:"pending" in x["complaint_result"],kns),
+ "ce_transferred":cnt(lambda r:"transferred" in r["student_status"],ces),
+ "ce_end_survey":cnt(lambda v:"end_of_course" in v["survey_type"],surveys),
+ "ob_over_info":cnt(lambda o:o["class_id"] and not o["class_info_sent_at"] and not o["onboarding_status"].startswith("completed") and (NOW-dt.datetime.strptime(o["assigned_at"],"%d/%m/%Y %H:%M")).total_seconds()>24*3600,obs),
+ "emerg_contact":cnt(lambda s:s["emergency_contact_phone"]!="",students),
+ "unqualified":cnt(lambda L:"unqualified" in L["lead_qualification_status"],leads),
+ "handover_hist":cnt(lambda L:L["view_history"],leads),
+ "handover_tam":cnt(lambda L:L["handover_until"],leads),
+ "doi_lop":cnt(lambda o:int(o["placement_change_count"] or 0)>0,obs),
+})
+for k,mn in [("duyet_pending",3),("refund_queue",2),("unverified",4),("sess_upcoming7",5),("test_upcoming7",5),("wow_upcoming7",5),("call_upcoming7",10),("hw_cho_cham",8),("hw_chua_thu",8),("ob_need_send",1),("ob_rejected",1),("sv_followup",2),("fb_neg_new",2),("kn_link",2),("wow_nonote",2),("risk_students",3),
+ ("test_late",2),("test_cancelled",2),("test_refused",2),("sess_inprog",1),("sess_cancelled",2),("gv_note_sla",20),("installment",2),("fee_gd",2),("quota_het",1),("quota_extra",2),("wow_note_tre",1),("kn_rejected_result",1),("kn_pending_result",1),("ce_transferred",2),("ce_end_survey",4),("ob_over_info",1),("emerg_contact",30),("unqualified",5),("handover_hist",8),("handover_tam",4),("doi_lop",4)]:
+    chk(cov[k]>=mn,"coverage %s=%d < %d"%(k,cov[k],mn))
+print("COVERAGE:",json.dumps(cov,ensure_ascii=False))
+tot=sum(len(v) for v in dl_new.values())
+print("TỔNG:",tot,"dòng |",{k:len(v) for k,v in dl_new.items()})
+if err:
+    print("LỖI KIỂM ĐỊNH:",len(err));[print(" -",e) for e in err[:20]]
+    raise SystemExit(1)
+json.dump(out,open(P,"w",encoding="utf-8"),ensure_ascii=False)
+print("OK -> demo_data_big.json (sạch, neo",FD(TODAY),")")
