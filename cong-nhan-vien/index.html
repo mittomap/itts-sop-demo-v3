@@ -3168,6 +3168,13 @@ input[type=checkbox],input[type=radio]{width:17px;height:17px;flex:none;accent-c
 .cfmsg{font-size:13px;color:var(--text);line-height:1.55;margin-bottom:18px}
 .cfa{display:flex;justify-content:flex-end;gap:9px}
 .drawer{position:fixed;top:0;right:0;bottom:0;width:var(--drw,760px);max-width:96vw;background:#fff;z-index:171;box-shadow:-8px 0 30px rgba(0,0,0,.16);transform:translateX(102%);transition:transform .22s ease;display:flex;flex-direction:column}
+/* V9.27: keo mep trai de doi do rong drawer, moi nguoi mot so do rieng */
+.drszr{position:absolute;left:0;top:0;bottom:0;width:8px;cursor:col-resize;z-index:5;background:transparent;transition:background .12s}
+.drszr:hover,.drszr.drag{background:linear-gradient(90deg,rgba(59,130,196,.28),transparent)}
+.drszr:after{content:"";position:absolute;left:2px;top:50%;margin-top:-18px;width:3px;height:36px;border-radius:3px;background:#C4D2E4;transition:.12s}
+.drszr:hover:after,.drszr.drag:after{background:var(--blue);height:56px;margin-top:-28px}
+body.drsz{cursor:col-resize;user-select:none}
+body.drsz .drawer{transition:none}
 /* V9.56: tu 900px tro xuong (may tinh bang doc, dien thoai xoay ngang) ngan keo 760px de len man
    834px chi chua lai 74px - khong con la "tam phu len trang" ma la mot man hinh kem mot vet thua.
    Duoi nguong nay cho no chiem tron man - kieu ngan keo toan man quen thuoc tren cam ung.
@@ -3900,7 +3907,7 @@ input[type=checkbox],input[type=radio]{width:17px;height:17px;flex:none;accent-c
          demo chạy trên GitHub Pages và trình duyệt giữ lại file cũ (file app nặng 5MB nên cache
          rất dai). Từ nay chân menu ghi NGÀY DỰNG + MÃ BẢN DỰNG: đọc mã ấy là biết ngay đang xem
          bản nào, khỏi đoán. Mã sinh từ nội dung file nên nội dung y hệt thì mã y hệt. -->
-    <div class="navver" id="navver" title="Ngày dựng và mã bản dựng - đọc mã này khi báo lỗi để biết chắc đang xem đúng bản nào">16/09/2026 · <b>0ff021</b></div>
+    <div class="navver" id="navver" title="Ngày dựng và mã bản dựng - đọc mã này khi báo lỗi để biết chắc đang xem đúng bản nào">16/09/2026 · <b>f4087e</b></div>
   </aside>
   <div class="navmask" id="navmask" onclick="closeNav()"></div>
   <div class="main">
@@ -3935,7 +3942,7 @@ input[type=checkbox],input[type=radio]{width:17px;height:17px;flex:none;accent-c
 <div class="mask" id="mask" onclick="closeModal()"></div>
 <div class="rsmask" id="rsbox"></div>
 <div class="cfmask" id="cfm"><div class="cfbox"><div class="cfh"><i class="ti ti-alert-triangle"></i> Xác nhận thao tác</div><div class="cfmsg" id="cfmMsg"></div><div class="fld full" style="margin:2px 0 10px"><label>Ghi chú (không bắt buộc)</label><textarea id="cfmNote" rows="2" placeholder="Lý do, số liệu đã đối chiếu, ai đồng ý... - lưu vào nhật ký để sau này tra lại"></textarea></div><div class="cfa"><button class="btn" onclick="closeConfirm()">Hủy</button><button class="btn primary" onclick="confirmYes()">Xác nhận</button></div></div></div>
-<div class="drawer" id="drawer" role="dialog" aria-modal="true"><div class="dh"><b id="drawerTitle">Chi tiết</b><button class="x" onclick="closeModal()" aria-label="Đóng">&times;</button></div><div class="dbody" id="drawerBody"></div></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true"><div class="drszr" id="drszr" title="Kéo để đổi độ rộng - bấm đúp để về mặc định"></div><div class="dh"><b id="drawerTitle">Chi tiết</b><button class="x" onclick="closeModal()" aria-label="Đóng">&times;</button></div><div class="dbody" id="drawerBody"></div></div>
 
 <script src="../ITTs_data.js"></script>
 <script>
@@ -11674,7 +11681,35 @@ function goDD(cid,sess){window.BLCLASS=cid;window.DDCLASS=cid;window.DDSESS=sess
 function tourCleanup(){if(TOUR&&TOUR.on)return;
  try{var s=document.getElementById("tourspot");if(s&&s.remove)s.remove()}catch(e){}
  try{var b=document.getElementById("tourbox");if(b&&b.remove)b.remove()}catch(e){}}
-function openDrawer(title,html){tourCleanup();document.body.classList.add("drwon");document.getElementById("drawerTitle").textContent=title;document.getElementById("drawerBody").innerHTML=html;try{pkQuet(document.getElementById("drawerBody"))}catch(e){}document.getElementById("mask").classList.add("on");document.getElementById("drawer").classList.add("on")}
+var DRW_MIN=420,DRW_DEF=760;
+function drwKey(){var me="";try{me=tkMeId()||CURSTAFF||""}catch(e){me=CURSTAFF||""}
+ return "ITTS_DRAWER_W_"+(me||"guest")}
+function drwMax(){return Math.max(DRW_MIN,(typeof window!=="undefined"&&window.innerWidth?window.innerWidth:1200)-40)}
+function drwGet(){try{var v=parseInt(localStorage.getItem(drwKey())||"",10);
+ if(v&&v>=DRW_MIN)return Math.min(v,drwMax())}catch(e){}return DRW_DEF}
+function drwSet(px,save){var d=document.getElementById("drawer");if(!d)return;
+ px=Math.max(DRW_MIN,Math.min(Math.round(px),drwMax()));
+ d.style.setProperty("--drw",px+"px");
+ if(save)try{localStorage.setItem(drwKey(),String(px))}catch(e){}}
+function drwApply(){drwSet(drwGet(),0)}
+function drwReset(){try{localStorage.removeItem(drwKey())}catch(e){}drwSet(DRW_DEF,0);toast("Đã về độ rộng mặc định.")}
+function drwInit(){var g=document.getElementById("drszr");if(!g||g.__on)return;g.__on=1;
+ function start(x0,w0){
+  document.body.classList.add("drsz");g.classList.add("drag");
+  function mv(ev){var cx=(ev.touches&&ev.touches[0])?ev.touches[0].clientX:ev.clientX;
+   drwSet(w0+(x0-cx),0);if(ev.cancelable)ev.preventDefault()}
+  function up(){document.body.classList.remove("drsz");g.classList.remove("drag");
+   document.removeEventListener("mousemove",mv);document.removeEventListener("mouseup",up);
+   document.removeEventListener("touchmove",mv);document.removeEventListener("touchend",up);
+   var d=document.getElementById("drawer");drwSet(d?d.getBoundingClientRect().width:DRW_DEF,1)}
+  document.addEventListener("mousemove",mv);document.addEventListener("mouseup",up);
+  document.addEventListener("touchmove",mv,{passive:false});document.addEventListener("touchend",up)}
+ g.addEventListener("mousedown",function(e){var d=document.getElementById("drawer");
+  start(e.clientX,d?d.getBoundingClientRect().width:DRW_DEF);e.preventDefault()});
+ g.addEventListener("touchstart",function(e){var d=document.getElementById("drawer");
+  start(e.touches[0].clientX,d?d.getBoundingClientRect().width:DRW_DEF)},{passive:true});
+ g.addEventListener("dblclick",drwReset)}
+function openDrawer(title,html){tourCleanup();drwInit();drwApply();document.body.classList.add("drwon");document.getElementById("drawerTitle").textContent=title;document.getElementById("drawerBody").innerHTML=html;try{pkQuet(document.getElementById("drawerBody"))}catch(e){}document.getElementById("mask").classList.add("on");document.getElementById("drawer").classList.add("on")}
 /* Nháy một vòng sáng quanh một nút để nói "nó nằm ở đây" - dùng khi vừa đóng một thứ và người
    dùng cần biết đường mở lại. Tự gỡ lớp sau khi chạy xong để lần sau còn nháy tiếp được. */
 function nhacCho(id,giay){
