@@ -13,7 +13,7 @@ print(hashlib.sha1(text.encode('utf-8')).hexdigest()[:6])
 PY
 )
 
-ITTS_OUT="$ROOT" python3 "$ROOT/_src/gen_v5.py"
+BUILD_TS="$BUILD_TS" BUILD_ID="$BUILD_ID" ITTS_OUT="$ROOT" python3 "$ROOT/_src/gen_v5.py"
 python3 - "$ROOT/_src/trangchu_demo.html" "$ROOT/index.html" "$BUILD_TS" "$BUILD_ID" <<'PY'
 import pathlib, sys
 src = pathlib.Path(sys.argv[1])

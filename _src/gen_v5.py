@@ -37561,7 +37561,8 @@ HV_SHELL = r"""
   <aside class="hvside" id="hvSide">
     <div class="hvbrand"><div class="logo" style="width:34px;height:34px;border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 40 40" width="22" height="22" aria-hidden="true"><g fill="none" stroke="#D51920" stroke-width="3.2"><circle cx="20" cy="20" r="14"/><circle cx="20" cy="20" r="7.5"/></g><circle cx="20" cy="20" r="3.4" fill="#D51920"/><g stroke="#D51920" stroke-width="3.2"><line x1="20" y1="1.5" x2="20" y2="9"/><line x1="20" y1="31" x2="20" y2="38.5"/><line x1="1.5" y1="20" x2="9" y2="20"/><line x1="31" y1="20" x2="38.5" y2="20"/></g></svg></div><div><b style="text-transform:uppercase;letter-spacing:.6px">IELTS The Tutors</b><small>Cổng học viên</small></div></div>
     <div class="hvme"><div class="av" id="hvAv">?</div><div><b id="hvWho">-</b><small id="hvWho2">-</small></div></div>
-    <nav class="hvnav" id="hvNav"></nav>
+   <nav class="hvnav" id="hvNav"></nav>
+   <div class="navver" id="navver" title="Ngày dựng và mã bản dựng - đọc mã này khi báo lỗi để biết chắc đang xem đúng bản nào">__GEN_STAMP__ · <b>__BUILD_ID__</b></div>
   </aside>
   <div class="hvright">
     <div class="hvtop">
@@ -37689,7 +37690,7 @@ import datetime as _dt
 # thi ba file san pham phai GIONG HET ban truoc. Truoc day co ca gio nen moi lan chay verify.sh
 # la 4 file "thay doi" du noi dung y nguyen - git day len toan commit rac, va nguoi doc lich su
 # khong phan biet duoc lan nao that su doi gi.
-_GEN=_dt.datetime.now().strftime("%d/%m/%Y")
+_GEN=os.environ.get("BUILD_TS") or _dt.datetime.now().strftime("%d/%m/%Y")
 out=out.replace("__GEN_STAMP__",_GEN); out_hv=out_hv.replace("__GEN_STAMP__",_GEN)
 # MA BAN DUNG: bam sat NOI DUNG file, khong bam vao dong ho. Noi dung y het -> ma y het
 # (giu dung luat "dung lai trong cung mot ngay ma khong doi dong ma nao thi file phai giong
@@ -37708,8 +37709,8 @@ _ASSET=""
 for _fn in ("tabler_inline.css","montserrat_inline.css"):
     try: _ASSET+=open(os.path.join(_SD,_fn),"r",encoding="utf-8").read()
     except Exception: pass
-_bid=_hl.sha1((out.replace("__BUILD_ID__","")+_ASSET).encode("utf-8")).hexdigest()[:6]
-_bidhv=_hl.sha1((out_hv.replace("__BUILD_ID__","")+_ASSET).encode("utf-8")).hexdigest()[:6]
+_bid=os.environ.get("BUILD_ID") or _hl.sha1((out.replace("__BUILD_ID__","")+_ASSET).encode("utf-8")).hexdigest()[:6]
+_bidhv=_bid
 out=out.replace("__BUILD_ID__",_bid); out_hv=out_hv.replace("__BUILD_ID__",_bidhv)
 print("BUILD ID:",_bid)
 assert "demoBootHV()" in out_hv and 'id="login"' in out_hv, "LAP RAP HV GAY: boot/gate khong dung cho"
