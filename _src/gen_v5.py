@@ -2395,13 +2395,6 @@ table.dt tbody tr.clk.on td{font-weight:600}
  -webkit-mask-composite:xor;mask-composite:exclude;padding:2px}
 .qaGlow>*{position:relative;z-index:1}
 @media(prefers-reduced-motion:reduce){.nhacvong{animation:none}.qaGlow:before{animation:none;opacity:.5}}
-.zwrap{display:flex;align-items:center;gap:4px;height:32px;padding:0 6px;border:1px solid var(--line);
- border-radius:8px;background:#fff;flex:none}
-.zwrap>i{font-size:14px;color:var(--muted);line-height:1}
-.zwrap>select{border:0;background:none;font-family:inherit;font-size:12px;font-weight:700;
- color:var(--navy);cursor:pointer;height:30px;padding:0 2px}
-.zwrap>select:focus{outline:none}
-@media(max-width:1199px){.zwrap{display:none}}   /* màn nhỏ: để trình duyệt tự lo, thu nhỏ nữa là nút khó bấm */
 /* V9.99f (anh Luân, kèm ảnh: *"mấy cái ô này hẹp quá"*). Câu gợi ý là "Gõ để tìm trong 22 lựa
    chọn" - dài khoảng 210px, mà ô chỉ rộng tối thiểu 150px nên chữ bị cắt cụt thành "...22 lựa".
    Người dùng đọc câu hướng dẫn mà câu hướng dẫn bị cụt là hỏng đúng chỗ nó sinh ra để đỡ.
@@ -2924,13 +2917,6 @@ input[type=checkbox],input[type=radio]{width:17px;height:17px;flex:none;accent-c
 .cfmsg{font-size:13px;color:var(--text);line-height:1.55;margin-bottom:18px}
 .cfa{display:flex;justify-content:flex-end;gap:9px}
 .drawer{position:fixed;top:0;right:0;bottom:0;width:var(--drw,760px);max-width:96vw;background:#fff;z-index:171;box-shadow:-8px 0 30px rgba(0,0,0,.16);transform:translateX(102%);transition:transform .22s ease;display:flex;flex-direction:column}
-/* V9.27: keo mep trai de doi do rong drawer, moi nguoi mot so do rieng (luu tren may cua nguoi do) */
-.drszr{position:absolute;left:0;top:0;bottom:0;width:8px;cursor:col-resize;z-index:5;background:transparent;transition:background .12s}
-.drszr:hover,.drszr.drag{background:linear-gradient(90deg,rgba(59,130,196,.28),transparent)}
-.drszr:after{content:"";position:absolute;left:2px;top:50%;margin-top:-18px;width:3px;height:36px;border-radius:3px;background:#C4D2E4;transition:.12s}
-.drszr:hover:after,.drszr.drag:after{background:var(--blue);height:56px;margin-top:-28px}
-body.drsz{cursor:col-resize;user-select:none}
-body.drsz .drawer{transition:none}
 /* V9.56: tu 900px tro xuong (may tinh bang doc, dien thoai xoay ngang) ngan keo 760px de len man
    834px chi chua lai 74px - khong con la "tam phu len trang" ma la mot man hinh kem mot vet thua.
    Duoi nguong nay cho no chiem tron man - kieu ngan keo toan man quen thuoc tren cam ung.
@@ -3682,7 +3668,6 @@ body.drsz .drawer{transition:none}
      (anh Luan bat). id=tourBtn don ve day de tourBtnSync (an/hien theo Cai dat) van chay. -->
         <button class="tbtn" id="tourBtn" data-tour="help" onclick="tourMenu()" aria-label="Hướng dẫn sử dụng" title="Hướng dẫn từng bước - chọn cấp độ rồi app chỉ tận nơi"><i class="ti ti-help-circle"></i></button>
         <div class="bosw" id="boSw" data-tour="bosw"></div>
-        <div class="zwrap" data-tour="tyle"><i class="ti ti-text-size"></i><select id="zoomSel" onchange="zoomSet(this.value)" aria-label="Tỷ lệ hiển thị"></select></div>
         <button class="tbtn" id="gyBtn" data-tour="gopy" onclick="gopyMo()" aria-label="Báo lỗi hoặc góp ý" data-tip="Báo lỗi / góp ý - mở bảng ghi nhận ở tab mới"><i class="ti ti-message-report"></i></button>
         <button class="tbtn" data-tour="bell" onclick="toggleBell(event)" aria-label="Thông báo"><i class="ti ti-bell"></i><span class="n" id="bellN" style="display:none">0</span></button>
         <div class="notif" id="notif"></div>
@@ -3699,7 +3684,7 @@ body.drsz .drawer{transition:none}
 <div class="mask" id="mask" onclick="closeModal()"></div>
 <div class="rsmask" id="rsbox"></div>
 <div class="cfmask" id="cfm"><div class="cfbox"><div class="cfh"><i class="ti ti-alert-triangle"></i> Xác nhận thao tác</div><div class="cfmsg" id="cfmMsg"></div><div class="fld full" style="margin:2px 0 10px"><label>Ghi chú (không bắt buộc)</label><textarea id="cfmNote" rows="2" placeholder="Lý do, số liệu đã đối chiếu, ai đồng ý... - lưu vào nhật ký để sau này tra lại"></textarea></div><div class="cfa"><button class="btn" onclick="closeConfirm()">Hủy</button><button class="btn primary" onclick="confirmYes()">Xác nhận</button></div></div></div>
-<div class="drawer" id="drawer" role="dialog" aria-modal="true"><div class="drszr" id="drszr" title="Kéo để đổi độ rộng - bấm đúp để về mặc định"></div><div class="dh"><b id="drawerTitle">Chi tiết</b><button class="x" onclick="closeModal()" aria-label="Đóng">&times;</button></div><div class="dbody" id="drawerBody"></div></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true"><div class="dh"><b id="drawerTitle">Chi tiết</b><button class="x" onclick="closeModal()" aria-label="Đóng">&times;</button></div><div class="dbody" id="drawerBody"></div></div>
 
 <script src="ITTs_data.js"></script>
 <script>
@@ -11438,38 +11423,7 @@ function goDD(cid,sess){window.BLCLASS=cid;window.DDCLASS=cid;window.DDSESS=sess
 function tourCleanup(){if(TOUR&&TOUR.on)return;
  try{var s=document.getElementById("tourspot");if(s&&s.remove)s.remove()}catch(e){}
  try{var b=document.getElementById("tourbox");if(b&&b.remove)b.remove()}catch(e){}}
-/* ===== V9.27 KEO DOI DO RONG DRAWER =====
-   So do luu tren MAY CUA TUNG NGUOI (localStorage theo ma nhan vien), khong dua vao dữ liệu demo
-   chung - vi day la thoi quen ca nhan, khong phai cau hinh cua trung tam. */
-var DRW_MIN=420,DRW_DEF=760;
-function drwKey(){var me="";try{me=tkMeId()||CURSTAFF||""}catch(e){me=CURSTAFF||""}
- return "ITTS_DRAWER_W_"+(me||"guest")}
-function drwMax(){return Math.max(DRW_MIN,(typeof window!=="undefined"&&window.innerWidth?window.innerWidth:1200)-40)}
-function drwGet(){try{var v=parseInt(localStorage.getItem(drwKey())||"",10);
- if(v&&v>=DRW_MIN)return Math.min(v,drwMax())}catch(e){}return DRW_DEF}
-function drwSet(px,save){var d=document.getElementById("drawer");if(!d)return;
- px=Math.max(DRW_MIN,Math.min(Math.round(px),drwMax()));
- d.style.setProperty("--drw",px+"px");
- if(save)try{localStorage.setItem(drwKey(),String(px))}catch(e){}}
-function drwApply(){drwSet(drwGet(),0)}
-function drwReset(){try{localStorage.removeItem(drwKey())}catch(e){}drwSet(DRW_DEF,0);toast("Đã về độ rộng mặc định.")}
-function drwInit(){var g=document.getElementById("drszr");if(!g||g.__on)return;g.__on=1;
- function start(x0,w0){
-  document.body.classList.add("drsz");g.classList.add("drag");
-  function mv(ev){var cx=(ev.touches&&ev.touches[0])?ev.touches[0].clientX:ev.clientX;
-   drwSet(w0+(x0-cx),0);if(ev.cancelable)ev.preventDefault()}
-  function up(){document.body.classList.remove("drsz");g.classList.remove("drag");
-   document.removeEventListener("mousemove",mv);document.removeEventListener("mouseup",up);
-   document.removeEventListener("touchmove",mv);document.removeEventListener("touchend",up);
-   var d=document.getElementById("drawer");drwSet(d?d.getBoundingClientRect().width:DRW_DEF,1)}
-  document.addEventListener("mousemove",mv);document.addEventListener("mouseup",up);
-  document.addEventListener("touchmove",mv,{passive:false});document.addEventListener("touchend",up)}
- g.addEventListener("mousedown",function(e){var d=document.getElementById("drawer");
-  start(e.clientX,d?d.getBoundingClientRect().width:DRW_DEF);e.preventDefault()});
- g.addEventListener("touchstart",function(e){var d=document.getElementById("drawer");
-  start(e.touches[0].clientX,d?d.getBoundingClientRect().width:DRW_DEF)},{passive:true});
- g.addEventListener("dblclick",drwReset)}
-function openDrawer(title,html){tourCleanup();drwInit();drwApply();document.body.classList.add("drwon");document.getElementById("drawerTitle").textContent=title;document.getElementById("drawerBody").innerHTML=html;try{pkQuet(document.getElementById("drawerBody"))}catch(e){}document.getElementById("mask").classList.add("on");document.getElementById("drawer").classList.add("on")}
+function openDrawer(title,html){tourCleanup();document.body.classList.add("drwon");document.getElementById("drawerTitle").textContent=title;document.getElementById("drawerBody").innerHTML=html;try{pkQuet(document.getElementById("drawerBody"))}catch(e){}document.getElementById("mask").classList.add("on");document.getElementById("drawer").classList.add("on")}
 /* Nháy một vòng sáng quanh một nút để nói "nó nằm ở đây" - dùng khi vừa đóng một thứ và người
    dùng cần biết đường mở lại. Tự gỡ lớp sau khi chạy xong để lần sau còn nháy tiếp được. */
 function nhacCho(id,giay){
@@ -11495,37 +11449,6 @@ function asstHeMo(){
     setTimeout(function(){try{asstClose();nhacCho("tthBtn",4)}catch(e){}},3200)}
    catch(e){}},1400)}
  catch(e){}}
-/* ═══ TỶ LỆ HIỂN THỊ ════════════════════════════════════════════════════════════════════════
-   Mặc định 90% theo anh Luân chốt 03/08. Nhớ theo MÁY (localStorage) chứ không vào cấu hình
-   trung tâm: đây là thói quen cá nhân và phụ thuộc cỡ màn của từng người - cùng một cách đã
-   dùng cho độ rộng ngăn kéo và bộ lọc đã lưu.
-   Dùng `zoom` chứ không dùng `transform:scale`: scale làm lệch mọi thứ dán cứng (thanh trên,
-   ngăn kéo, hộp xác nhận) và làm toạ độ chuột không còn khớp với chỗ nhìn thấy. */
-var ZKEY="ITTS_ZOOM_V1", ZMUC=[80,90,100,110,125], ZMAC=90;
-function zoomGet(){var v=0;try{v=parseInt(localStorage.getItem(ZKEY)||"",10)}catch(e){}
- return (ZMUC.indexOf(v)>=0)?v:ZMAC}
-function zoomApply(v){
- try{document.body.style.zoom=(v===100)?"":(v/100)}catch(e){}
- /* Bù lại chiều cao vỏ app: `zoom` co cả `vh` nên `100vh` không còn bằng chiều cao cửa sổ.
-    Xem chú thích ở `.app` - đây là chỗ vá gốc, không phải vá từng màn. */
- try{document.documentElement.style.setProperty("--vh",(v===100)?"100vh":(100*100/v)+"vh")}catch(e){}
- /* MÀN NHỎ GIỮ NGUYÊN 100%, dù người dùng đã chọn khác trên máy tính.
-    Mốc **1200px**, hạ dần từ 820 qua 1000 vì `_checkui` đo trên trình duyệt thật và bắt được
-    nút tụt xuống dưới 24px: điện thoại nằm ngang 844px ra 689 nút, máy tính bảng nằm ngang
-    1112px vẫn còn 357 nút. Lý do là số học chứ không phải cảm tính - thu 90% thì nút 26px chỉ
-    còn 23.4px, ngón tay bấm trượt. Thu nhỏ sinh ra để nhét vừa BẢNG RỘNG trên màn máy tính;
-    máy tính bảng và điện thoại vốn đã phải cuộn, thu thêm chỉ làm nút khó bấm. */
- try{if((window.innerWidth||1400)<1200){document.body.style.zoom="";
-  document.documentElement.style.setProperty("--vh","100vh")}}catch(e){}}
-function zoomSet(v){v=parseInt(v,10)||ZMAC;
- try{localStorage.setItem(ZKEY,String(v))}catch(e){}
- zoomApply(v);zoomVe()}
-function zoomVe(){var el=document.getElementById("zoomSel");if(!el)return;
- var cur=zoomGet();
- el.innerHTML=ZMUC.map(function(n){return '<option value="'+n+'"'+(n===cur?" selected":"")+'>'+n+'%</option>'}).join("");
- el.setAttribute("data-tip","Tỷ lệ hiển thị - màn nhỏ để 90% là vừa một bảng rộng, không phải cuộn ngang")}
-function zoomInit(){zoomApply(zoomGet());zoomVe();
- try{window.addEventListener("resize",function(){zoomApply(zoomGet())})}catch(e){}}
 /* ═══ Ô CHỌN DÀI PHẢI GÕ ĐƯỢC (V9.91) ═══════════════════════════════════════════════════════
    Anh Luân 03/08, kèm ảnh chụp form Tiếp nhận khiếu nại: *"làm sao chọn nổi em, chỗ đó phải là
    tìm kiếm"*. Đúng - ô Học viên là <select> thường đổ ra hơn ba trăm dòng, muốn chọn phải kéo
@@ -11791,15 +11714,11 @@ function renderCanhan(){
  /* --- thói quen trên máy này --- */
  h+='<div class="panel"><div class="ph"><b><i class="ti ti-adjustments" style="margin-right:6px"></i>Thói quen dùng app trên máy này</b></div><div class="pbody">';
  h+='<div class="grid2">';
- h+='<div class="fld"><label>Tỷ lệ hiển thị</label><select onchange="zoomSet(this.value)">'+
-  ZMUC.map(function(n){return '<option value="'+n+'"'+(n===zoomGet()?" selected":"")+'>'+n+'%</option>'}).join("")+
-  '</select><div class="fhint">Trên màn 13 inch, mức chín mươi phần trăm vừa đủ một bảng rộng mà không phải cuộn ngang.</div></div>';
- h+='<div class="fld"><label>Nút bánh răng sửa tại chỗ</label><select onchange="uiSet(\'gear\',this.value===\'1\'?1:0);reRender(CUR)">'+
+ h+='<div class="fld"><label>Nút bánh răng sửa tại chỗ</label><select onchange="uiSet(\'gear\',this.value===\'1\'?1:0);reRender(CUR)\'>'+
   '<option value="1"'+(UI().gear?" selected":"")+'>Hiện - bấm là sửa ngay tại chỗ</option>'+
   '<option value="0"'+(UI().gear?"":" selected")+'>Ẩn - màn hình gọn hơn</option></select></div>';
  h+='</div>';
  h+='<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">'+
-  '<button class="btn" onclick="drwReset()"><i class="ti ti-arrows-horizontal"></i>Đặt lại bề rộng ngăn kéo</button>'+
   '<button class="btn" onclick="cnXoaThoiQuen()"><i class="ti ti-eraser"></i>Xóa mọi thói quen trên máy này</button></div>';
  h+='</div></div>';
  return h}
@@ -36879,7 +36798,7 @@ function enter(k){
  try{cfBarSync()}catch(e){}
  try{pkNghe()}catch(e){}
  try{moGan()}catch(e){}
- try{zoomInit()}catch(e){}
+ try{}catch(e){}
  try{asstHeMo()}catch(e){}
  try{rsBang()}catch(e){}
  try{tourOfferOnce()}catch(e){}}
@@ -37628,7 +37547,7 @@ HV_SHELL = r"""
 <div class="mask" id="mask" onclick="closeModal()"></div>
 <div class="rsmask" id="rsbox"></div>
 <div class="cfmask" id="cfm"><div class="cfbox"><div class="cfh"><i class="ti ti-alert-triangle"></i> Xác nhận thao tác</div><div class="cfmsg" id="cfmMsg"></div><div class="cfa"><button class="btn" onclick="closeConfirm()">Hủy</button><button class="btn primary" onclick="confirmYes()">Xác nhận</button></div></div></div>
-<div class="drawer" id="drawer"><div class="drszr" id="drszr" title="Kéo để đổi độ rộng - bấm đúp để về mặc định"></div><div class="dh"><b id="drawerTitle">Chi tiết</b><button class="x" onclick="closeModal()">&times;</button></div><div class="dbody" id="drawerBody"></div></div>
+<div class="drawer" id="drawer"><div class="dh"><b id="drawerTitle">Chi tiết</b><button class="x" onclick="closeModal()">&times;</button></div><div class="dbody" id="drawerBody"></div></div>
 """
 # ===== BAN KHAI CUA GHI (V9.31) =====
 # Mot su that, mot cho. Truoc day ban khai nay chi nam trong _check15.js nen app khong biet gi
