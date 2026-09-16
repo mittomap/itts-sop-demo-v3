@@ -52,6 +52,10 @@ body{font-family:var(--font);color:var(--text);background:var(--bg);font-size:va
  background-image:linear-gradient(175deg,rgba(255,255,255,.085) 0,rgba(255,255,255,.02) 34%,rgba(0,0,0,.06) 62%,rgba(0,0,0,.19) 100%);
  color:#C4D2E4;display:flex;flex-direction:column;position:relative;
  box-shadow:inset -1px 0 0 rgba(255,255,255,.07),3px 0 18px rgba(0,0,0,.13)}
+.sbszr{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:col-resize;z-index:5;background:transparent;transition:background .12s}
+.sbszr:hover,.sbszr.drag{background:linear-gradient(270deg,rgba(59,130,196,.28),transparent)}
+.sbszr:after{content:"";position:absolute;right:2px;top:50%;margin-top:-18px;width:3px;height:36px;border-radius:3px;background:#93A7C2;transition:.12s}
+.sbszr:hover:after,.sbszr.drag:after{background:var(--blue);height:56px;margin-top:-28px}
 .brand{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid #ffffff18}
 .brand .logo{width:38px;height:38px;border-radius:8px;background:#fff;color:var(--navy);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px}
 .brand b{color:#fff;font-size:14px;font-weight:800;line-height:1.1;text-transform:uppercase;letter-spacing:.7px}.brand small{display:block;color:#93A7C2;font-size:11px;font-weight:500;letter-spacing:.3px;margin-top:2px}
@@ -3544,6 +3548,7 @@ body.drsz .drawer{transition:none}
 @media(max-width:820px){
  .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:60;transform:translateX(-100%);transition:transform .22s ease;box-shadow:0 12px 40px #00000055}
  .sidebar.open{transform:none}
+ .sbszr{display:none}
  .navtoggle{display:flex}
 
  .navmask.on{display:block;position:fixed;inset:0;background:#0006;z-index:55}
@@ -3648,6 +3653,7 @@ body.drsz .drawer{transition:none}
 
 <div class="app" id="app" style="display:none">
   <aside class="sidebar" id="sidebar">
+      <div class="sbszr" id="sbszr" title="Kéo để đổi độ rộng menu - bấm đúp để về mặc định"></div>
     <div class="brand" data-tour="brand" onclick="trangChuDemo()" title="Về trang chủ bản demo - chọn cổng khác" style="cursor:pointer"><div class="logo" id="brandLogo"><svg viewBox="0 0 40 40" width="26" height="26" aria-hidden="true"><g fill="none" stroke="#D51920" stroke-width="3.2"><circle cx="20" cy="20" r="14"/><circle cx="20" cy="20" r="7.5"/></g><circle cx="20" cy="20" r="3.4" fill="#D51920"/><g stroke="#D51920" stroke-width="3.2"><line x1="20" y1="1.5" x2="20" y2="9"/><line x1="20" y1="31" x2="20" y2="38.5"/><line x1="1.5" y1="20" x2="9" y2="20"/><line x1="31" y1="20" x2="38.5" y2="20"/></g></svg></div><div><b id="brandName">ITTs - SOP TEMP</b><small id="brandSub">Hệ thống tuân thủ SOP</small></div></div>
     <nav class="nav" id="nav"></nav>
     <div class="me" data-tour="me" onclick="go('canhan')" title="Trang cá nhân - ảnh đại diện, mật khẩu, thói quen dùng app" style="cursor:pointer"><div class="av" id="meAv">M</div><div><b id="meName">-</b><small id="meRole">-</small></div><i class="ti ti-chevron-right" style="margin-left:auto;opacity:.6"></i></div>
@@ -11430,6 +11436,33 @@ function goDD(cid,sess){window.BLCLASS=cid;window.DDCLASS=cid;window.DDSESS=sess
 function tourCleanup(){if(TOUR&&TOUR.on)return;
  try{var s=document.getElementById("tourspot");if(s&&s.remove)s.remove()}catch(e){}
  try{var b=document.getElementById("tourbox");if(b&&b.remove)b.remove()}catch(e){}}
+var SB_MIN=210,SB_DEF=292,SB_MAX=420;
+function sbKey(){var me="";try{me=tkMeId()||CURSTAFF||""}catch(e){me=CURSTAFF||""}
+ return "ITTS_SIDEBAR_W_"+(me||"guest")}
+function sbGet(){try{var v=parseInt(localStorage.getItem(sbKey())||"",10);
+ if(v&&v>=SB_MIN)return Math.min(v,SB_MAX)}catch(e){}return SB_DEF}
+function sbSet(px,save){var d=document.getElementById("sidebar");if(!d)return;
+ px=Math.max(SB_MIN,Math.min(Math.round(px),SB_MAX));
+ d.style.setProperty("--sbw",px+"px");
+ if(save)try{localStorage.setItem(sbKey(),String(px))}catch(e){}}
+function sbApply(){sbSet(sbGet(),0)}
+function sbReset(){try{localStorage.removeItem(sbKey())}catch(e){}sbSet(SB_DEF,0);toast("Đã về độ rộng menu mặc định.")}
+function sbInit(){var g=document.getElementById("sbszr");if(!g||g.__on)return;g.__on=1;
+ function start(x0,w0){
+  document.body.classList.add("drsz");g.classList.add("drag");
+  function mv(ev){var cx=(ev.touches&&ev.touches[0])?ev.touches[0].clientX:ev.clientX;
+   sbSet(w0+(cx-x0),0);if(ev.cancelable)ev.preventDefault()}
+  function up(){document.body.classList.remove("drsz");g.classList.remove("drag");
+   document.removeEventListener("mousemove",mv);document.removeEventListener("mouseup",up);
+   document.removeEventListener("touchmove",mv);document.removeEventListener("touchend",up);
+   var d=document.getElementById("sidebar");sbSet(d?d.getBoundingClientRect().width:SB_DEF,1)}
+  document.addEventListener("mousemove",mv);document.addEventListener("mouseup",up);
+  document.addEventListener("touchmove",mv,{passive:false});document.addEventListener("touchend",up)}
+ g.addEventListener("mousedown",function(e){var d=document.getElementById("sidebar");
+  start(e.clientX,d?d.getBoundingClientRect().width:SB_DEF);e.preventDefault()});
+ g.addEventListener("touchstart",function(e){var d=document.getElementById("sidebar");
+  start(e.touches[0].clientX,d?d.getBoundingClientRect().width:SB_DEF)},{passive:true});
+ g.addEventListener("dblclick",sbReset)}
 var DRW_MIN=420,DRW_DEF=760;
 function drwKey(){var me="";try{me=tkMeId()||CURSTAFF||""}catch(e){me=CURSTAFF||""}
  return "ITTS_DRAWER_W_"+(me||"guest")}
@@ -36833,6 +36866,7 @@ function enter(k){
  try{cfBarSync()}catch(e){}
  try{pkNghe()}catch(e){}
  try{moGan()}catch(e){}
+ try{sbInit();sbApply()}catch(e){}
  try{}catch(e){}
  try{asstHeMo()}catch(e){}
  try{rsBang()}catch(e){}
